@@ -8,6 +8,7 @@ from __future__ import annotations
 from html import escape
 import base64
 from io import BytesIO
+import hashlib
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -18,7 +19,10 @@ from comparison import DEFAULT_SCENARIOS, run_comparison
 from corrosion import (serviceability_indicator, remaining_bar_history,
                        current_density_scenarios, area_loss_percent,
                        COL_TIME, COL_REMAIN, COL_ICORR, COL_T_CRACK, COL_T_PROP, COL_T_LIMIT)
-from ml import MODEL_NAMES, DEFAULT_MODEL, REQUIRED, fit_model, predict
+from ml import MODEL_NAMES, DEFAULT_MODEL, REQUIRED, fit_model, predict, repeated_cv
+
+SHORT_NAMES = {'ridge': 'Ridge', 'rf': 'Random Forest', 'hgb': 'Gradient Boosting',
+               'svr': 'SVR', 'gpr': 'Gaussian Process'}
 from pdf_report import build_pdf_report
 from physics import concentration, initiation_years
 
@@ -105,16 +109,8 @@ with st.sidebar:
         st.caption('Cột bắt buộc: ' + ', '.join(REQUIRED) + '. Đơn vị D_RCM là ×10⁻¹² m²/s.')
     data_label_en = {'Bộ dữ liệu RCM từ tài liệu': 'RCM literature dataset',
                      'CSV do người dùng tải lên': 'user-uploaded CSV'}.get(data_label, 'none')
-    model_name = st.selectbox('Mô hình AI', list(MODEL_NAMES),
-                              index=list(MODEL_NAMES).index(DEFAULT_MODEL),
-                              format_func=lambda k: MODEL_NAMES[k])
+    st.caption('Chọn và huấn luyện mô hình AI ở tab “Đánh giá AI”.')
     model, metrics, bounds = None, None, None
-    if training_bytes is not None:
-        try:
-            model, metrics, bounds = train_from_csv(training_bytes, model_name)
-            st.success(f"Đã huấn luyện: {metrics['train_count']} mẫu · kiểm tra: {metrics['test_count']} mẫu")
-        except Exception as exc:
-            st.error(f'Không thể huấn luyện: {exc}')
     st.divider()
     st.markdown('**02 — Bê tông tro bay và cấp phối**')
     fly_ash = st.number_input('Tro bay / chất kết dính (%)', 0.0, 80.0, 25.0, 1.0)
@@ -322,8 +318,73 @@ with validate_tab:
     st.markdown('<div class="cl-panel-title">AI dự báo hệ số RCM (di trú nhanh)</div>',unsafe_allow_html=True)
     st.markdown('<div class="cl-tab-intro">AI học từ dữ liệu RCM của tài liệu, KHÔNG phải D28 khuếch tán tự nhiên. '
                 'Kết quả chỉ dùng để khảo sát xu hướng. Không đưa vào mô hình Fick và không tính được tuổi thọ.</div>',unsafe_allow_html=True)
+    if training_bytes is None:
+        st.info('Chưa có dữ liệu AI. Chọn nguồn dữ liệu ở thanh bên trái.')
+    else:
+        dh = hashlib.md5(training_bytes).hexdigest()[:12]
+        holdout_store = st.session_state.setdefault('holdout_runs', {})
+        cv_store = st.session_state.setdefault('cv_runs', {})
+
+        st.markdown('**1. Huấn luyện từng mô hình (holdout 80/20)**')
+        st.caption('Mỗi nút huấn luyện một mô hình trên 80% dữ liệu và đo trên 20% giữ lại. '
+                   'Dùng để xem nhanh; KHÔNG nên chọn mô hình chỉ dựa trên bảng này.')
+        btn_cols = st.columns(len(MODEL_NAMES))
+        clicked = None
+        for col, name in zip(btn_cols, MODEL_NAMES):
+            with col:
+                if st.button(f'▶ {SHORT_NAMES[name]}', key=f'run_{name}_{dh}'):
+                    clicked = name
+        run_all = st.button('▶ Chạy tất cả mô hình', key=f'run_all_{dh}')
+        todo = list(MODEL_NAMES) if run_all else ([clicked] if clicked else [])
+        for name in todo:
+            with st.spinner(f'Đang huấn luyện {SHORT_NAMES[name]}...'):
+                _, mt, _ = train_from_csv(training_bytes, name)
+            holdout_store[(dh, name)] = mt
+        rows = []
+        for name in MODEL_NAMES:
+            mt = holdout_store.get((dh, name))
+            rows.append({
+                'Mô hình': SHORT_NAMES[name],
+                'Trạng thái': 'Đã huấn luyện' if mt else 'Chưa chạy',
+                'R² (log₁₀)': round(mt['R2_log10'], 3) if mt else None,
+                'MAE (×10⁻¹²)': round(mt['MAE_1e12'], 2) if mt else None,
+                'RMSE (×10⁻¹²)': round(mt['RMSE_1e12'], 2) if mt else None,
+                'Mẫu kiểm tra': mt['test_count'] if mt else None,
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+
+        st.markdown('**2. So sánh công bằng bằng CV lặp (cơ sở để chọn)**')
+        st.caption('CV theo tài liệu gốc, 5 lần lặp × 5 fold trên toàn bộ dữ liệu. Mô hình được chọn theo kết quả này. '
+                   'Chọn theo holdout sẽ làm kết quả báo cáo bị lạc quan.')
+        if st.button('▶ Chạy CV lặp để so sánh', key=f'run_cv_{dh}'):
+            with st.spinner('Đang chạy CV lặp, có thể mất vài phút (GPR chậm nhất)...'):
+                cv_store[dh] = repeated_cv(pd.read_csv(BytesIO(training_bytes)))
+        if dh in cv_store:
+            cvdf = cv_store[dh].copy()
+            cvdf['Mô hình'] = cvdf['model'].map(SHORT_NAMES)
+            cvdf = cvdf.rename(columns={'R2_log10_mean': 'R² CV trung bình (log₁₀)',
+                                        'R2_log10_std': 'Độ lệch chuẩn'})
+            st.dataframe(cvdf[['Mô hình', 'R² CV trung bình (log₁₀)', 'Độ lệch chuẩn']],
+                         hide_index=True, width='stretch')
+            st.caption(f"Đứng đầu CV: {cvdf.iloc[0]['Mô hình']}. Nếu hai mô hình chênh nhau dưới 0,02 R², "
+                       'coi như ngang nhau và nên chọn mô hình đơn giản hơn.')
+        else:
+            st.caption('Chưa chạy CV.')
+
+        st.markdown('**3. Chọn mô hình dùng cho dự báo**')
+        active = st.selectbox('Mô hình đang dùng', list(MODEL_NAMES),
+                              index=list(MODEL_NAMES).index(DEFAULT_MODEL),
+                              format_func=lambda k: MODEL_NAMES[k], key='active_model')
+        try:
+            with st.spinner('Đang huấn luyện mô hình đã chọn...'):
+                model, metrics, bounds = train_from_csv(training_bytes, active)
+            st.success(f"Đang dùng {MODEL_NAMES[active]}: {metrics['train_count']} mẫu huấn luyện · "
+                       f"{metrics['test_count']} mẫu kiểm tra")
+        except Exception as exc:
+            st.error(f'Không thể huấn luyện: {exc}')
+
     if metrics is None:
-        st.info('Chưa có dữ liệu AI. Chọn nguồn dữ liệu ở thanh bên trái để huấn luyện.')
+        st.info('Chọn mô hình ở trên để xem kết quả chi tiết.')
     else:
         st.caption(f"Mô hình: {metrics['model_label']} · Nguồn: {data_label} · Đại lượng: {metrics['target']}")
         for warn_text in metrics.get('warnings',[]):
