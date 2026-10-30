@@ -100,6 +100,11 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
         if v is None: return '--'
         return f'{float(v) / 1e-12:.2f} x 10^-12 m2/s'
 
+    def rcm_text(v):
+        if v is None or not np.isfinite(float(v)):
+            return '--'
+        return f'{float(v):.2f} x 10^-12 m2/s'
+
     def yeartext(v):
         return (f'{v:.1f} ' + T('năm','years')) if v is not None and np.isfinite(v) else (
             '> ' + str(parameters['horizon']) + ' ' + T('năm (chưa đạt)', 'years (not reached)'))
@@ -235,25 +240,25 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
         txt(L,top_y-82,T('Chưa có kịch bản so sánh hợp lệ.', 'No eligible comparison cases.'),9,MUTED)
         end_table = top_y-105
 
-    title(end_table-9,'04 / MODEL VALIDATION',T('Kiểm định AI trên tập giữ lại', 'AI evaluation on held-out data'))
+    title(end_table-9,'04 / MODEL VALIDATION',T('Kiểm định AI (RCM) trên tập giữ lại', 'AI (RCM) evaluation on held-out data'))
     vm_y = end_table-62
     if validation is not None:
         txt(L,vm_y, f"n = {validation.get('n','--')}   |   train = {validation.get('train_count','--')}   |   test = {validation.get('test_count','--')}",8.5,NAVY)
         vm_y -= 24
         txt(L,vm_y,'MAE',8.5,MUTED)
-        txt(L+62,vm_y, scientific(validation.get('MAE_m2_s')),9,NAVY,True)
+        txt(L+62,vm_y, rcm_text(validation.get('MAE_1e12')),9,NAVY,True)
         txt(L+266,vm_y,'RMSE',8.5,MUTED)
-        txt(L+336,vm_y,scientific(validation.get('RMSE_m2_s')),9,NAVY,True)
+        txt(L+336,vm_y,rcm_text(validation.get('RMSE_1e12')),9,NAVY,True)
         vm_y -= 22
-        txt(L,vm_y,'R2 (log10 D28)',8.5,MUTED)
+        txt(L,vm_y,'R2 (log10 RCM)',8.5,MUTED)
         txt(L+118,vm_y,f"{validation.get('R2_log10',float('nan')):.3f}",9,NAVY,True)
-        txt(L+266,vm_y,'R2 (D28)',8.5,MUTED)
+        txt(L+266,vm_y,'R2 (linear)',8.5,MUTED)
         txt(L+360,vm_y,f"{validation.get('R2_linear',float('nan')):.3f}",9,NAVY,True)
         vm_y -= 25
         msg = T('Nguồn AI: ' + str(parameters['model_source']), 'AI data: '+ str(parameters['model_source_en']))
         txt(L,vm_y,msg[:94],7.5,AMBER if parameters.get('synthetic') else MUTED)
     else:
-        txt(L,vm_y,T('Chưa nạp CSV nên chưa có kết quả kiểm định AI.', 'No CSV uploaded. AI validation is not available.'),9,MUTED)
+        txt(L,vm_y,T('Chưa nạp dữ liệu nên chưa có kết quả kiểm định AI.', 'No training data loaded. AI validation is not available.'),9,MUTED)
         vm_y -= 25
     y_method = min(vm_y-44, 275)
     title(y_method,'05 / SCIENTIFIC BASIS',T('Giả định và tiêu chuẩn tham khảo', 'Assumptions and standards referenced'))
@@ -266,8 +271,8 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
           'Referenced standards do not imply standards compliance or certification.'),
         T('Chỉ xét ăn mòn đều; chưa xét ăn mòn rỗ, nứt, tải trọng hoặc sức chịu lực.',
           'Uniform corrosion only; no pitting, cracking or load capacity analysis.'),
-        T('Các bộ dữ liệu DEMO là MÔ PHỎNG, không phải số liệu thí nghiệm.',
-          'DEMO datasets are SYNTHETIC, not experimentally measured.'),
+        T('AI dự báo hệ số RCM, KHÔNG phải D28; không đưa vào mô hình Fick.',
+          'AI predicts RCM coefficients, NOT D28; not used in the Fick model.'),
     ]
     for ix,line in enumerate(notes):
         txt(L+1, y_method-47-ix*19, '\u2022 '+line, 8.2, MUTED)

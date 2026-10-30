@@ -14,11 +14,11 @@ import pandas as pd
 import altair as alt
 import streamlit as st
 
-from comparison import DEFAULT_SCENARIOS, ai_scenario_inputs, run_comparison
+from comparison import DEFAULT_SCENARIOS, run_comparison
 from corrosion import (serviceability_indicator, remaining_bar_history,
                        current_density_scenarios, area_loss_percent,
                        COL_TIME, COL_REMAIN, COL_ICORR, COL_T_CRACK, COL_T_PROP, COL_T_LIMIT)
-from ml import FEATURES, fit_model, predict
+from ml import MODEL_NAMES, DEFAULT_MODEL, REQUIRED, fit_model, predict
 from pdf_report import build_pdf_report
 from physics import concentration, initiation_years
 
@@ -69,80 +69,81 @@ def info_card(label, value, note, emphasized=False):
 
 
 @st.cache_resource(show_spinner=False)
-def train_from_csv(raw_bytes: bytes):
-    """Cache fitting; never train on the visible holdout observations."""
+def train_from_csv(raw_bytes: bytes, model_name: str):
+    """Cache fitting per (dataset, model); the holdout is never used for fitting."""
     df = pd.read_csv(BytesIO(raw_bytes))
-    return fit_model(df)
+    return fit_model(df, model_name)
 
 
-# SIDEBAR - shared input state for all six tabs.
+# SIDEBAR - shared input state for all tabs.
 with st.sidebar:
     st.markdown(
         '<div class="cl-sidebar-brand"><strong>CloriLife <span>AI</span></strong>'
         '<small>CONCRETE DURABILITY LAB · v0.4.1</small></div>',
         unsafe_allow_html=True,
     )
-    st.markdown('**01 — Dữ liệu và chế độ dự báo**')
+    st.markdown('**01 — Dữ liệu huấn luyện AI (RCM)**')
     source_choice = st.selectbox('Nguồn dữ liệu AI', [
         'Chưa sử dụng bộ dữ liệu',
-        'Bộ dữ liệu DEMO mô phỏng',
+        'Bộ dữ liệu RCM từ tài liệu',
         'CSV thí nghiệm của tôi',
-    ], help='Bộ DEMO là dữ liệu tổng hợp, KHÔNG đại diện kết quả thí nghiệm.')
+    ], help='AI dự báo hệ số RCM (di trú nhanh), KHÔNG phải D28. Kết quả AI không đưa vào mô hình khuếch tán chính.')
     training_bytes = None
-    synthetic = False
-    if source_choice == 'Bộ dữ liệu DEMO mô phỏng':
+    data_label = 'Chưa có'
+    if source_choice == 'Bộ dữ liệu RCM từ tài liệu':
         try:
-            training_bytes = Path(__file__).with_name('data_demo_SYNTHETIC.csv').read_bytes()
+            training_bytes = Path(__file__).with_name('chloride_RCM_tidy.csv').read_bytes()
+            data_label = 'Bộ dữ liệu RCM từ tài liệu'
         except OSError:
-            st.error('Không tìm thấy data_demo_SYNTHETIC.csv cùng thư mục với app.py. '
+            st.error('Không tìm thấy chloride_RCM_tidy.csv cùng thư mục với app.py. '
                      'Hãy tải file này lên GitHub hoặc chọn nguồn dữ liệu khác.')
-        else:
-            synthetic = True
-            st.warning('Đang dùng dữ liệu MÔ PHỎNG. Chỉ thử nghiệm chức năng AI, không đánh giá độ chính xác khoa học.')
     elif source_choice == 'CSV thí nghiệm của tôi':
         upload = st.file_uploader('Tải CSV thí nghiệm', type=['csv'], key='training_csv')
         if upload is not None:
             training_bytes = upload.getvalue()
-            st.caption('Kiểm tra đơn vị, phương pháp đo và tính độc lập của các cấp phối trước khi sử dụng.')
-
+            data_label = 'CSV do người dùng tải lên'
+        st.caption('Cột bắt buộc: ' + ', '.join(REQUIRED) + '. Đơn vị D_RCM là ×10⁻¹² m²/s.')
+    data_label_en = {'Bộ dữ liệu RCM từ tài liệu': 'RCM literature dataset',
+                     'CSV do người dùng tải lên': 'user-uploaded CSV'}.get(data_label, 'none')
+    model_name = st.selectbox('Mô hình AI', list(MODEL_NAMES),
+                              index=list(MODEL_NAMES).index(DEFAULT_MODEL),
+                              format_func=lambda k: MODEL_NAMES[k])
     model, metrics, bounds = None, None, None
     if training_bytes is not None:
         try:
-            model, metrics, bounds = train_from_csv(training_bytes)
+            model, metrics, bounds = train_from_csv(training_bytes, model_name)
             st.success(f"Đã huấn luyện: {metrics['train_count']} mẫu · kiểm tra: {metrics['test_count']} mẫu")
         except Exception as exc:
             st.error(f'Không thể huấn luyện: {exc}')
-
-    mode = st.radio('Hệ số khuếch tán cho bài toán chính', [
-        'Nhập D28 đo được / tham khảo', 'AI dự báo D28 từ CSV',
-    ], help='Chế độ nhập thủ công không dự báo D28 bằng AI.', key='main_mode')
     st.divider()
     st.markdown('**02 — Bê tông tro bay và cấp phối**')
-    fly_ash = st.number_input('Tro bay / chất kết dính (%)',0.0,80.0,25.0,1.0)
-    wb = st.number_input('Nước / chất kết dính',0.15,0.90,0.40,0.01)
-    curing = st.number_input('Tuổi mẫu khi thí nghiệm (ngày)',1,3650,28)
-    strength = st.number_input('Cường độ chịu nén (MPa)',5.0,150.0,40.0,1.0)
-    temp = st.number_input('Nhiệt độ tham chiếu (°C)',0.0,60.0,25.0,1.0)
-    values = dict(zip(FEATURES,[fly_ash,wb,curing,strength,temp]))
-
-    outside = []
-    if mode == 'AI dự báo D28 từ CSV':
-        d28 = None
-        if model is not None:
-            d28_pred, outside = predict(model, values, bounds)
-            if outside:
-                st.error('Thông số vượt miền huấn luyện: '+', '.join(outside))
-            else:
-                d28 = d28_pred
-                st.success(f'D28 từ AI: {d28/1e-12:.3f} ×10⁻¹² m²/s')
-        else:
-            st.info('Hãy chọn bộ CSV phù hợp để kích hoạt dự báo AI.')
-    else:
-        d28 = st.number_input(
-            'D28 đo được / tham khảo (×10⁻¹² m²/s)',
-            min_value=0.01,max_value=100.0,value=8.0,step=0.5
-        ) * 1e-12
-    m = st.number_input('Số mũ già hóa m (giả định / hiệu chuẩn)',0.0,0.95,0.35,0.05)
+    fly_ash = st.number_input('Tro bay / chất kết dính (%)', 0.0, 80.0, 25.0, 1.0)
+    slag = st.number_input('Xỉ / chất kết dính (%)', 0.0, 80.0, 0.0, 1.0)
+    wb = st.number_input('Nước / chất kết dính', 0.15, 0.90, 0.40, 0.01)
+    cement_family = st.selectbox('Họ xi măng', ['PO', 'PII', 'PI'])
+    cement_grade = st.selectbox('Cấp xi măng', ['32.5', '42.5', '42.5R', '52.5', '52.5R'], index=1)
+    method = st.selectbox('Phương pháp thử RCM (cho AI)', ['not_stated', 'constant', 'variable'],
+                          format_func=lambda k: {'not_stated': 'Không rõ / không ghi',
+                                                 'constant': 'Điện áp không đổi',
+                                                 'variable': 'Điện áp thay đổi'}[k])
+    if fly_ash + slag > 100:
+        st.error('Tro bay + xỉ không được vượt 100% chất kết dính.')
+    ai_base = {
+        'water_binder_ratio': wb,
+        'fly_ash_fraction_of_binder': fly_ash / 100,
+        'slag_fraction_of_binder': slag / 100,
+        'cement_family': cement_family,
+        'cement_grade': cement_grade,
+        'method': method,
+    }
+    st.divider()
+    st.markdown('**D28 cho bài toán khuếch tán chính**')
+    d28 = st.number_input(
+        'D28 đo được / tham khảo (×10⁻¹² m²/s)',
+        min_value=0.01, max_value=100.0, value=8.0, step=0.5
+    ) * 1e-12
+    st.caption('D28 là hệ số khuếch tán tự nhiên sau 28 ngày. Hệ số RCM của bộ dữ liệu KHÔNG được dùng thay thế D28.')
+    m = st.number_input('Số mũ già hóa m (giả định / hiệu chuẩn)', 0.0, 0.95, 0.35, 0.05)
     st.caption('Dữ liệu mặc định chỉ để minh họa. Không sử dụng để thiết kế kết cấu.')
     st.divider()
     st.markdown('**03 — Kịch bản ăn mòn phát triển**')
@@ -209,10 +210,6 @@ ready, blocked_kind, blocked_msg = True, 'error', ''
 years, time_axis, chloride_axis, c_10, service = None, None, None, None, None
 if not (c0 < critical < cs):
     ready, blocked_msg = False, 'Dữ liệu không hợp lệ: cần C0 < Ccrit < Cs.'
-elif d28 is None:
-    ready, blocked_kind = False, 'info'
-    blocked_msg = ('Chưa có D28 hợp lệ cho bài toán chính. Chọn nhập D28 hoặc cung cấp CSV AI '
-                   'và thông số nằm trong miền dữ liệu. Các tab So sánh, Đánh giá AI vẫn dùng được.')
 else:
     try:
         years = initiation_years(cover,d28,m,cs,critical,c0,horizon)
@@ -256,8 +253,6 @@ if ready:
                 'Không phải thời điểm phá hoại hoặc kết luận an toàn kết cấu',True),unsafe_allow_html=True)
     st.caption('Các mốc do người dùng tự chọn (độ xuyên sâu gây nứt, ngưỡng hao hụt thép). ASTM G102-23 hướng dẫn chuyển tốc độ '
                'ăn mòn điện hóa; không cung cấp thời gian hết tuổi thọ cho cấu kiện này.')
-    if synthetic and mode == 'AI dự báo D28 từ CSV':
-        st.warning('KẾT QUẢ AI DỰA TRÊN DỮ LIỆU MÔ PHỎNG: không sử dụng để kết luận độ bền lâu của công trình.')
 else:
     (st.error if blocked_kind == 'error' else st.info)(blocked_msg)
 
@@ -278,38 +273,21 @@ comparison_df = pd.DataFrame()
 comparison_origin = 'Không có'
 with compare_tab:
     st.markdown('<div class="cl-panel-title">So sánh 0% – 40% tro bay theo các kịch bản D28</div>',unsafe_allow_html=True)
-    st.markdown('<div class="cl-tab-intro">Giữ cố định N/CKD, lớp bảo vệ, Cs, Ccrit và m để khảo sát sự khác biệt do D28 của từng cấp phối. '
-                'Không tự suy diễn quan hệ nhân quả khi thiếu dữ liệu thí nghiệm.</div>',unsafe_allow_html=True)
-    cmp_mode = st.radio('Nguồn D28 cho từng hàm lượng tro bay',[
-        'Nhập D28 cho từng cấp phối',
-        'AI dự báo từ bộ dữ liệu CSV',
-    ],horizontal=True)
-    scenarios = pd.DataFrame(columns=['Tro bay (%)','D28 (x10^-12 m2/s)'])
-    if cmp_mode == 'Nhập D28 cho từng cấp phối':
-        comparison_origin = 'BẢNG D28 GIẢ ĐỊNH / DO NGƯỜI DÙNG CHỈNH SỬA'
-        st.warning('Các giá trị D28 mặc định là GIẢ ĐỊNH MINH HỌA, không phải dữ liệu nghiên cứu. '
-                   'Hãy sửa thành kết quả thí nghiệm thực nếu muốn so sánh kỹ thuật.')
-        scenarios = st.data_editor(
-            DEFAULT_SCENARIOS.copy(),num_rows='dynamic',width='stretch',
-            hide_index=True,key='scenario_editor',
-            column_config={
-                'Tro bay (%)':st.column_config.NumberColumn('Tro bay (%)',min_value=0,max_value=100,step=1,required=True),
-                'D28 (x10^-12 m2/s)':st.column_config.NumberColumn('D28 (×10⁻¹² m²/s)',min_value=0.001,step=0.1,format='%.3f',required=True),
-            }
-        )
-    elif model is None:
-        st.info('Chọn nguồn dữ liệu CSV ở thanh bên trái để sử dụng AI trong chức năng so sánh.')
-    else:
-        comparison_origin = 'AI TỪ DỮ LIỆU MÔ PHỎNG' if synthetic else 'AI TỪ CSV DO NGƯỜI DÙNG CUNG CẤP'
-        st.warning('AI chỉ dự báo trong miền giá trị đã xuất hiện khi huấn luyện. '
-                   'Các tỷ lệ 0% hoặc 40% nằm ngoài miền này sẽ bị bỏ qua, không ngoại suy.')
-        st.info('Khi đổi hàm lượng tro bay, các thông số còn lại (N/CKD, cường độ nén, tuổi, nhiệt độ) được giữ nguyên '
-                'theo thanh bên trái. Thực tế cường độ thay đổi theo tro bay, nên hãy xem đây là khảo sát độ nhạy, không phải dự báo cấp phối thật.')
-        scenarios, skipped = ai_scenario_inputs(model,bounds,values)
-        for rate, feats in skipped:
-            st.info(f'Bỏ qua tỷ lệ tro bay {rate}%: ngoài miền huấn luyện ở {", ".join(feats)}.')
-        if synthetic:
-            st.error('Nguồn AI hiện tại là bộ dữ liệu MÔ PHỎNG, kết quả chỉ để thử thao tác phần mềm.')
+    st.markdown('<div class="cl-tab-intro">Nhập D28 cho từng cấp phối. Giữ cố định N/CKD, lớp bảo vệ, Cs, Ccrit và m để khảo sát '
+                'sự khác biệt do D28 của từng cấp phối. Không tự suy diễn quan hệ nhân quả khi thiếu dữ liệu thí nghiệm. '
+                'AI chỉ dự báo RCM nên không dùng để điền D28 ở đây.</div>',unsafe_allow_html=True)
+    comparison_origin = 'BẢNG D28 GIẢ ĐỊNH / DO NGƯỜI DÙNG CHỈNH SỬA'
+    st.warning('Các giá trị D28 mặc định là GIẢ ĐỊNH MINH HỌA, không phải dữ liệu nghiên cứu. '
+               'Hãy sửa thành kết quả thí nghiệm thực nếu muốn so sánh kỹ thuật.')
+    scenarios = st.data_editor(
+        DEFAULT_SCENARIOS.copy(),num_rows='dynamic',width='stretch',
+        hide_index=True,key='scenario_editor',
+        column_config={
+            'Tro bay (%)':st.column_config.NumberColumn('Tro bay (%)',min_value=0,max_value=100,step=1,required=True),
+            'D28 (x10^-12 m2/s)':st.column_config.NumberColumn('D28 (×10⁻¹² m²/s)',min_value=0.001,step=0.1,format='%.3f',required=True),
+        }
+    )
+    comparison_df = pd.DataFrame()
     if not scenarios.empty:
         try:
             comparison_df=run_comparison(scenarios,cover,m,cs,critical,c0,horizon)
@@ -341,61 +319,79 @@ with compare_tab:
                 file_name='CloriLife_v04_fly_ash_comparison.csv',mime='text/csv')
 
 with validate_tab:
-    st.markdown('<div class="cl-panel-title">Đánh giá mô hình AI bằng tập dữ liệu độc lập khi huấn luyện</div>',unsafe_allow_html=True)
-    st.markdown('<div class="cl-tab-intro">Chỉ hiển thị khi người dùng nạp CSV; các chỉ số dựa trên tập kiểm tra giữ lại 20%, '
-                'không phải độ chính xác đã được kiểm chứng liên phòng thí nghiệm.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="cl-panel-title">AI dự báo hệ số RCM (di trú nhanh)</div>',unsafe_allow_html=True)
+    st.markdown('<div class="cl-tab-intro">AI học từ dữ liệu RCM của tài liệu, KHÔNG phải D28 khuếch tán tự nhiên. '
+                'Kết quả chỉ dùng để khảo sát xu hướng. Không đưa vào mô hình Fick và không tính được tuổi thọ.</div>',unsafe_allow_html=True)
     if metrics is None:
-        st.info('Chưa có dữ liệu AI. Chọn “CSV thí nghiệm của tôi” ở thanh bên trái, hoặc DEMO để thử giao diện.')
+        st.info('Chưa có dữ liệu AI. Chọn nguồn dữ liệu ở thanh bên trái để huấn luyện.')
     else:
-        if synthetic:
-            st.error('THỬ NGHIỆM BẰNG DỮ LIỆU TỔNG HỢP: MAE, RMSE, R² KHÔNG CHỨNG MINH ĐỘ CHÍNH XÁC TRÊN BÊ TÔNG THẬT.')
-        if not metrics['groups_used']:
-            st.warning('Đang chia dữ liệu ngẫu nhiên theo dòng. Nếu CSV có nhiều mẫu lặp cùng cấp phối, bổ sung cột mix_id để kiểm tra theo nhóm, tránh rò rỉ thông tin.')
+        st.caption(f"Mô hình: {metrics['model_label']} · Nguồn: {data_label} · Đại lượng: {metrics['target']}")
         for warn_text in metrics.get('warnings',[]):
             st.warning(warn_text)
         cols=st.columns(4,gap='medium')
         for cell,(label,value,foot) in zip(cols,[
-            ('MAE D28',f"{metrics['MAE_m2_s']/1e-12:.3f} ×10⁻¹²",'m²/s · tập kiểm tra'),
-            ('RMSE D28',f"{metrics['RMSE_m2_s']/1e-12:.3f} ×10⁻¹²",'m²/s · tập kiểm tra'),
-            ('R² (log₁₀ D28)',f"{metrics['R2_log10']:.3f}",'Không phải xác suất'),
-            ('Mẫu kiểm tra',f"{metrics['test_count']} / {metrics['n']}",'Giữ lại để đánh giá'),
+            ('MAE (×10⁻¹² m²/s)',f"{metrics['MAE_1e12']:.2f}",f"Mốc cơ sở: {metrics['baseline_MAE_1e12']:.2f}"),
+            ('RMSE (×10⁻¹² m²/s)',f"{metrics['RMSE_1e12']:.2f}",'Tập kiểm tra giữ lại'),
+            ('R² (log₁₀ RCM)',f"{metrics['R2_log10']:.3f}",'Không phải tỷ lệ % chính xác'),
+            ('Mẫu kiểm tra',f"{metrics['test_count']} / {metrics['n']}",f"{metrics['groups_total']} tài liệu gốc"),
         ]):
             with cell: st.markdown(info_card(label,value,foot),unsafe_allow_html=True)
-        st.caption(f"Phân chia: {metrics['split_strategy']}. Đã loại {metrics['filtered_rows']} dòng không hợp lệ.")
-        st.caption(f"MAE mốc tham chiếu (median tập train): {metrics['baseline_MAE_m2_s']/1e-12:.3f} ×10⁻¹² m²/s. Nếu MAE của AI lớn hơn, mô hình chưa vượt mốc cơ sở.")
-        cv=metrics.get('cv_r2_log10')
-        if cv:
-            st.caption(f"Kiểm tra chéo {cv['k']}-fold: R² (log₁₀ D28) = {cv['mean']:.3f} ± {cv['std']:.3f}. "
-                       'Ổn định hơn một lần chia 80/20 khi dữ liệu ít; độ lệch chuẩn lớn nghĩa là mô hình chưa ổn định.')
+        st.caption(f"Phân chia: {metrics['split_strategy']}. Đã loại {metrics['filtered_rows']} dòng trùng lặp hoặc không hợp lệ.")
         left,right=st.columns([1.1,0.9],gap='large')
         with left:
-            st.markdown('**Thực đo / giá trị dữ liệu vs AI dự báo (tập kiểm tra)**')
-            observed=metrics['holdout'].copy()
-            observed['Thực tế (×10⁻¹²)']=observed['D28_thuc_te_m2_s']/1e-12
-            observed['AI dự báo (×10⁻¹²)']=observed['D28_AI_m2_s']/1e-12
-            lo=float(min(observed['Thực tế (×10⁻¹²)'].min(),observed['AI dự báo (×10⁻¹²)'].min()))
-            hi=float(max(observed['Thực tế (×10⁻¹²)'].max(),observed['AI dự báo (×10⁻¹²)'].max()))
-            diag=alt.Chart(pd.DataFrame({'Thực tế (×10⁻¹²)':[lo,hi],'AI dự báo (×10⁻¹²)':[lo,hi]})).mark_line(color='#dca459',strokeDash=[5,5]).encode(
-                x=alt.X('Thực tế (×10⁻¹²):Q',title='D28 thực tế trong CSV (×10⁻¹² m²/s)'),
-                y=alt.Y('AI dự báo (×10⁻¹²):Q',title='D28 AI dự báo (×10⁻¹² m²/s)'))
+            st.markdown('**RCM thực đo và AI dự báo (tập kiểm tra)**')
+            observed=metrics['holdout'].rename(columns={'D_RCM_thuc_te':'Thực đo','D_RCM_AI':'AI dự báo'})
+            lo=float(min(observed['Thực đo'].min(),observed['AI dự báo'].min()))
+            hi=float(max(observed['Thực đo'].max(),observed['AI dự báo'].max()))
+            diag=alt.Chart(pd.DataFrame({'Thực đo':[lo,hi],'AI dự báo':[lo,hi]})).mark_line(color='#dca459',strokeDash=[5,5]).encode(
+                x=alt.X('Thực đo:Q',title='RCM thực đo (×10⁻¹² m²/s)'),
+                y=alt.Y('AI dự báo:Q',title='RCM AI dự báo (×10⁻¹² m²/s)'))
             pts=alt.Chart(observed).mark_circle(color='#147f96',size=95,opacity=0.75).encode(
-                x=alt.X('Thực tế (×10⁻¹²):Q',title='D28 thực tế trong CSV (×10⁻¹² m²/s)'),
-                y=alt.Y('AI dự báo (×10⁻¹²):Q',title='D28 AI dự báo (×10⁻¹² m²/s)'),
-                tooltip=[alt.Tooltip('Thực tế (×10⁻¹²):Q',format='.3f'),alt.Tooltip('AI dự báo (×10⁻¹²):Q',format='.3f')]
-            )
+                x=alt.X('Thực đo:Q',title='RCM thực đo (×10⁻¹² m²/s)'),
+                y=alt.Y('AI dự báo:Q',title='RCM AI dự báo (×10⁻¹² m²/s)'),
+                tooltip=[alt.Tooltip('Thực đo:Q',format='.2f'),alt.Tooltip('AI dự báo:Q',format='.2f')])
             st.altair_chart((diag+pts).properties(height=340),width='stretch')
         with right:
-            st.markdown('**Mức đóng góp đặc trưng của Random Forest**')
+            st.markdown('**Mức quan trọng đặc trưng (hoán vị)**')
             fi=metrics['importance'].copy()
             st.altair_chart(alt.Chart(fi).mark_bar(color='#237b90').encode(
-                x=alt.X('importance:Q',title='Tầm quan trọng tương đối (không phải quan hệ nhân quả)'),
+                x=alt.X('importance:Q',title='Giảm R² khi xáo trộn đặc trưng (không phải quan hệ nhân quả)'),
                 y=alt.Y('feature:N',sort='-x',title=None),
                 tooltip=[alt.Tooltip('feature:N'),alt.Tooltip('importance:Q',format='.3f')]
             ).properties(height=340),width='stretch')
-        st.download_button('⬇ Tải bảng quan trắc–dự báo tập kiểm tra (CSV)',
+        st.download_button('⬇ Tải bảng RCM thực đo – AI dự báo (CSV)',
             metrics['holdout'].to_csv(index=False).encode('utf-8-sig'),
-            file_name='CloriLife_v04_ai_validation.csv',mime='text/csv')
-        st.caption('Điểm phân chia có cùng cấp phối cần được nhóm lại bằng mix_id. Ngoại suy ngoài khoảng huấn luyện bị từ chối trong dự báo từng kịch bản.')
+            file_name='CloriLife_v04_rcm_validation.csv',mime='text/csv')
+
+    st.markdown('<div class="cl-section">KHẢO SÁT THEO TỶ LỆ TRO BAY (AI)</div>',unsafe_allow_html=True)
+    if model is None:
+        st.info('Cần huấn luyện AI ở thanh bên trái để khảo sát.')
+    else:
+        sweep_rows=[]
+        for rate in range(0,41,5):
+            vals=dict(ai_base); vals['fly_ash_fraction_of_binder']=rate/100
+            if vals['fly_ash_fraction_of_binder']+vals['slag_fraction_of_binder']>1:
+                continue
+            value,outside=predict(model,vals,bounds)
+            sweep_rows.append({'Tro bay (%)':rate,
+                               'RCM AI (×10⁻¹² m²/s)':None if outside else round(value,3),
+                               'Ngoài miền huấn luyện':', '.join(outside) if outside else '—'})
+        sweep=pd.DataFrame(sweep_rows)
+        st.dataframe(sweep,hide_index=True,width='stretch')
+        plotted=sweep.dropna(subset=['RCM AI (×10⁻¹² m²/s)'])
+        if plotted.empty:
+            st.warning('Không có tỷ lệ tro bay nào nằm trong miền huấn luyện với các thông số hiện tại.')
+        else:
+            st.altair_chart(alt.Chart(plotted).mark_line(point=True,color='#0b637e',strokeWidth=3).encode(
+                x=alt.X('Tro bay (%):Q',title='Tro bay (% chất kết dính)'),
+                y=alt.Y('RCM AI (×10⁻¹² m²/s):Q',title='RCM AI (×10⁻¹² m²/s)'),
+                tooltip=['Tro bay (%):Q',alt.Tooltip('RCM AI (×10⁻¹² m²/s):Q',format='.2f')]
+            ).properties(height=295),width='stretch')
+        st.caption('Giữ nguyên N/CKD, xỉ, họ và cấp xi măng, phương pháp thử theo thanh bên. Tỷ lệ ngoài miền huấn luyện bị bỏ qua, không ngoại suy. '
+                   'Đây là RCM, không phải D28, nên không tính được tuổi thọ từ kết quả này.')
+        st.download_button('⬇ Tải khảo sát RCM theo tro bay (CSV)',
+            sweep.to_csv(index=False).encode('utf-8-sig'),
+            file_name='CloriLife_v04_rcm_flyash_sweep.csv',mime='text/csv')
 
 with method_tab:
     st.markdown('<div class="cl-panel-title">Cơ sở khoa học và kiểm soát chất lượng dữ liệu</div>',unsafe_allow_html=True)
@@ -406,20 +402,20 @@ with method_tab:
     st.markdown('**Mốc nứt lớp bảo vệ:** thời gian từ khởi phát đến khi độ xuyên sâu thép đạt giá trị giả định do người dùng đặt (µm), '
                 'tính bằng độ xuyên sâu chia tốc độ ăn mòn. Mốc này thường đến sớm hơn nhiều so với mốc hao hụt tiết diện vài phần trăm, '
                 'nhưng giá trị gây nứt phụ thuộc lớp bảo vệ, đường kính và chất lượng bê tông nên cần hiệu chuẩn.')
-    st.markdown('**Bộ dữ liệu AI:** các cột `fly_ash_pct`, `water_binder_ratio`, `curing_days`, '
-                '`compressive_strength_mpa`, `temperature_c`, `d28_m2_s` và tùy chọn `mix_id`. '
-                'D28 phải cùng định nghĩa, phương pháp và tuổi tham chiếu trên toàn bộ dữ liệu. '
-                'Không được trộn trực tiếp hệ số theo ASTM C1556 với NT BUILD 492 hay điện lượng ASTM C1202.')
+    st.markdown('**Bộ dữ liệu AI (RCM):** các cột `reference`, `cement`, `method`, `fly_ash_fraction_of_binder`, '
+                '`slag_fraction_of_binder`, `water_binder_ratio`, `D_RCM_1e-12_m2_per_s`. Đại lượng là hệ số di trú nhanh (RCM), '
+                '**không phải D28**. Không trộn trực tiếp với hệ số D28 hay hệ số theo ASTM C1556. '
+                'Các mẫu cùng tài liệu gốc luôn nằm cùng một phía khi chia tập kiểm tra.')
     st.markdown('**Tiêu chuẩn tham khảo:** TCVN 12041:2017 (độ bền lâu), TCVN 9346:2012 (chống ăn mòn môi trường biển), '
                 'TCVN 10302:2014 (tro bay), ASTM C1556 (khuếch tán clorua) và ASTM G102-23 (chuyển dòng ăn mòn thành tốc độ mất thép). Đây là căn cứ nghiên cứu, '
                 '**không có nghĩa phần mềm đã được chứng nhận phù hợp tiêu chuẩn**.')
-    st.markdown('**Độ chính xác AI:** giữ lại 20% quan sát; nếu có `mix_id`, chia theo nhóm cấp phối. '
-                'MAE/RMSE có đơn vị m²/s; R² có thể âm và không phải tỷ lệ % chính xác. '
-                'Cần kiểm định trên tập dữ liệu thực độc lập trước khi dùng kết quả phục vụ kỹ thuật.')
+    st.markdown('**Độ chính xác AI:** giữ lại 20% theo tài liệu gốc; CV lặp trên toàn bộ dữ liệu dùng để chọn mô hình mặc định. '
+                'MAE, RMSE có đơn vị ×10⁻¹² m²/s; R² có thể âm và không phải tỷ lệ % chính xác. '
+                'Cần kiểm định trên dữ liệu độc lập trước khi dùng kết quả cho kỹ thuật.')
     st.markdown('**Giới hạn:** chưa xét liên kết clorua, hút mao dẫn, xâm nhập đối lưu, '
                 'ướt–khô theo chu kỳ, ăn mòn rỗ, nứt và bong lớp bảo vệ, nhiệt–ẩm biến đổi, '
                 'độ tin cậy hay khả năng chịu lực còn lại của kết cấu.')
-    template = pd.DataFrame(columns=FEATURES+['d28_m2_s','mix_id'])
+    template = pd.DataFrame(columns=REQUIRED)
     st.download_button('⬇ Tải mẫu cấu trúc CSV trống',
                        template.to_csv(index=False).encode('utf-8-sig'),
                        file_name='CloriLife_AI_training_template.csv',mime='text/csv')
@@ -428,122 +424,117 @@ if not ready:
     for _tab in (main_tab, service_tab, report_tab):
         with _tab:
             st.info('Cần D28 hợp lệ và C0 < Ccrit < Cs (xem phần đầu trang) để hiển thị nội dung này.')
-    st.stop()
 
-with main_tab:
-    st.markdown('<div class="cl-panel-title">Diễn biến nồng độ clorua tại vị trí cốt thép</div>',unsafe_allow_html=True)
-    st.markdown('<div class="cl-panel-sub">Đường xanh: nồng độ Cl⁻ dự báo; đường đứt nét: Ccrit giả định</div>',unsafe_allow_html=True)
-    series = pd.DataFrame({'Năm':time_axis,'Clorua tại cốt thép (%)':chloride_axis})
-    main_curve = alt.Chart(series).mark_line(color='#147f96',strokeWidth=3).encode(
-        x=alt.X('Năm:Q',title='Thời gian phân tích (năm)',scale=alt.Scale(domain=[0,horizon])),
-        y=alt.Y('Clorua tại cốt thép (%):Q',title='Cl⁻ (% khối lượng chất kết dính)'),
-        tooltip=[alt.Tooltip('Năm:Q',format='.1f'),alt.Tooltip('Clorua tại cốt thép (%):Q',format='.3f')]
-    )
-    threshold = alt.Chart(pd.DataFrame({'Clorua tại cốt thép (%)':[critical]})).mark_rule(color='#d49a46',strokeDash=[6,5],strokeWidth=2).encode(
-        y=alt.Y('Clorua tại cốt thép (%):Q',title='Cl⁻ (% khối lượng chất kết dính)'))
-    st.altair_chart((main_curve+threshold).properties(height=350,background='#ffffff').configure_axis(
-        gridColor='#e9eef4',domainColor='#ccd7e0',labelColor='#597287',titleColor='#27485e'
-    ).configure_view(stroke=None),width='stretch')
-    if years is None:
-        st.info(f'Chưa đạt Ccrit trong {horizon} năm phân tích. Không thể suy ra tuổi thọ thực > {horizon} năm.')
-    else:
-        st.success(f'Mô hình tính đạt Ccrit sau {years:.1f} năm với bộ giả định hiện tại.')
-    st.download_button('⬇ Tải đường cong nồng độ CSV',
-        data=series.to_csv(index=False).encode('utf-8-sig'),
-        file_name='CloriLife_v04_chloride_curve.csv',mime='text/csv')
+if ready:
+    with main_tab:
+        st.markdown('<div class="cl-panel-title">Diễn biến nồng độ clorua tại vị trí cốt thép</div>',unsafe_allow_html=True)
+        st.markdown('<div class="cl-panel-sub">Đường xanh: nồng độ Cl⁻ dự báo; đường đứt nét: Ccrit giả định</div>',unsafe_allow_html=True)
+        series = pd.DataFrame({'Năm':time_axis,'Clorua tại cốt thép (%)':chloride_axis})
+        main_curve = alt.Chart(series).mark_line(color='#147f96',strokeWidth=3).encode(
+            x=alt.X('Năm:Q',title='Thời gian phân tích (năm)',scale=alt.Scale(domain=[0,horizon])),
+            y=alt.Y('Clorua tại cốt thép (%):Q',title='Cl⁻ (% khối lượng chất kết dính)'),
+            tooltip=[alt.Tooltip('Năm:Q',format='.1f'),alt.Tooltip('Clorua tại cốt thép (%):Q',format='.3f')]
+        )
+        threshold = alt.Chart(pd.DataFrame({'Clorua tại cốt thép (%)':[critical]})).mark_rule(color='#d49a46',strokeDash=[6,5],strokeWidth=2).encode(
+            y=alt.Y('Clorua tại cốt thép (%):Q',title='Cl⁻ (% khối lượng chất kết dính)'))
+        st.altair_chart((main_curve+threshold).properties(height=350,background='#ffffff').configure_axis(
+            gridColor='#e9eef4',domainColor='#ccd7e0',labelColor='#597287',titleColor='#27485e'
+        ).configure_view(stroke=None),width='stretch')
+        if years is None:
+            st.info(f'Chưa đạt Ccrit trong {horizon} năm phân tích. Không thể suy ra tuổi thọ thực > {horizon} năm.')
+        else:
+            st.success(f'Mô hình tính đạt Ccrit sau {years:.1f} năm với bộ giả định hiện tại.')
+        st.download_button('⬇ Tải đường cong nồng độ CSV',
+            data=series.to_csv(index=False).encode('utf-8-sig'),
+            file_name='CloriLife_v04_chloride_curve.csv',mime='text/csv')
 
+    with service_tab:
+        st.markdown('<div class="cl-panel-title">Tổng hợp hai giai đoạn: khởi phát và ăn mòn phát triển</div>',unsafe_allow_html=True)
+        st.markdown('<div class="cl-tab-intro">Từ thời điểm clorua đạt ngưỡng, giả định thép ăn mòn ĐỀU với mật độ dòng i_corr không đổi. '
+                    'Hai mốc kết thúc do người dùng định nghĩa: độ xuyên sâu gây nứt lớp bảo vệ (µm) và tỷ lệ hao hụt diện tích '
+                    'tiết diện thanh thép. Cả hai đều không phải trạng thái giới hạn chịu lực được xác minh.</div>', unsafe_allow_html=True)
+        cols=st.columns(4)
+        cols[0].metric('Đường kính thép',f'{bar_diameter:.1f} mm')
+        cols[1].metric('Mật độ dòng ăn mòn',f'{i_corr:.2f} µA/cm²')
+        cols[2].metric('Tốc độ xuyên sâu',f"{service['rate_mm_per_year']:.4f} mm/năm")
+        cols[3].metric('Độ xuyên sâu tại ngưỡng hao hụt',f"{service['penetration_limit_mm']:.3f} mm")
+        crack_cols=st.columns(3)
+        crack_cols[0].metric('Độ xuyên sâu gây nứt (giả định)',f'{crack_um:.0f} µm')
+        crack_cols[1].metric('Từ khởi phát đến nứt',f"{service['cracking_years']:.1f} năm")
+        crack_cols[2].metric('Hao hụt tiết diện khi nứt',f"{service['cracking_area_loss_pct']:.2f} %")
+        st.latex(r'v_{corr} \approx 0.0116 \, i_{corr} \quad [\mathrm{mm/year}]')
+        st.latex(r'A_{remain}/A_0 = (1-2p/d_0)^2, \quad T_{limit}=T_{init}+p_{limit}/v_{corr}, \quad T_{crack}=T_{init}+p_{crack}/v_{corr}')
+        if service['cracking_years'] < service['propagation_years']:
+            st.info(f"Mốc nứt ({service['cracking_years']:.1f} năm sau khởi phát) đến sớm hơn mốc hao hụt {area_limit}% "
+                    f"({service['propagation_years']:.1f} năm). Khi lớp bảo vệ đã nứt hoặc bong, điều kiện ẩm/oxy và i_corr có thể "
+                    'thay đổi nên phần diễn biến phía sau mốc nứt kém tin cậy hơn.')
+        if service['total_years'] is None:
+            st.warning('Trong giới hạn phân tích đã chọn, Cl⁻ chưa đạt ngưỡng khởi phát. '
+                       'Vì vậy KHÔNG suy diễn một thời điểm nứt hoặc hao hụt tiết diện cụ thể.')
+        else:
+            st.markdown(f"**Ví dụ hiện tại:** đạt ngưỡng Cl⁻ sau {years:.1f} năm; "
+                        f"mốc nứt giả định sau **{service['cracking_total_years']:.1f} năm**; "
+                        f"mốc hao hụt {area_limit}% tiết diện sau **{service['total_years']:.1f} năm**.")
+            trajectory = remaining_bar_history(service)
+            x_enc = alt.X(f'{COL_TIME}:Q',title='Thời gian (năm)')
+            y_enc = alt.Y(f'{COL_REMAIN}:Q',title='Tiết diện thanh thép còn lại (%)',scale=alt.Scale(domain=[0,105]))
+            chart = alt.Chart(trajectory).mark_line(color='#0c8194',strokeWidth=3).encode(
+                x=x_enc, y=y_enc,
+                tooltip=[alt.Tooltip(f'{COL_TIME}:Q',format='.1f'),
+                         alt.Tooltip(f'{COL_REMAIN}:Q',format='.2f')]
+            ).properties(height=305)
+            limit_y = alt.Chart(pd.DataFrame({COL_REMAIN:[100-area_limit]})).mark_rule(
+                color='#d49a46',strokeDash=[6,5],strokeWidth=2).encode(y=y_enc)
+            crack_x = alt.Chart(pd.DataFrame({COL_TIME:[service['cracking_total_years']]})).mark_rule(
+                color='#c2503f',strokeDash=[2,4],strokeWidth=2).encode(x=x_enc)
+            st.altair_chart(chart+limit_y+crack_x,width='stretch')
+            st.caption('Đường cam: ngưỡng hao hụt tiết diện đã chọn · Đường đỏ đứt: mốc nứt lớp bảo vệ (giả định).')
+            st.download_button('⬇ Tải diễn biến tiết diện thép (CSV)',
+                trajectory.to_csv(index=False).encode('utf-8-sig'),
+                'CloriLife_v04_steel_area_curve.csv',mime='text/csv')
+        st.markdown('**Độ nhạy theo giả định tốc độ ăn mòn**')
+        scenarios_corr = current_density_scenarios(years,bar_diameter,area_limit,
+                  currents=sorted(set([0.25,0.5,1.0,2.0,5.0,round(float(i_corr),3)])),
+                  cracking_penetration_um=crack_um)
+        st.dataframe(scenarios_corr,hide_index=True,width='stretch',
+                     column_config={
+                         COL_ICORR:st.column_config.NumberColumn(format='%.2f'),
+                         COL_T_CRACK:st.column_config.NumberColumn(format='%.1f'),
+                         COL_T_PROP:st.column_config.NumberColumn(format='%.1f'),
+                         COL_T_LIMIT:st.column_config.NumberColumn(format='%.1f'),
+                     })
+        st.download_button('⬇ Tải bảng độ nhạy tốc độ ăn mòn (CSV)',
+            scenarios_corr.to_csv(index=False).encode('utf-8-sig'),
+            'CloriLife_v04_corrosion_sensitivity.csv',mime='text/csv')
+        st.warning('GIỚI HẠN KHOA HỌC: Đây là chỉ số theo kịch bản với i_corr nhập vào, không phải AI '
+                   'dự báo i_corr. i_corr được giữ như nhau cho mọi cấp phối, nên lợi ích của tro bay ở giai đoạn ăn mòn '
+                   '(điện trở suất cao hơn) chưa được tính. Chưa xét ăn mòn rỗ cục bộ (mất tiết diện tại điểm rỗ có thể '
+                   'lớn hơn nhiều giá trị trung bình), oxy/ẩm, nứt bê tông, bong lớp bảo vệ, độ bám dính, bố trí thép hoặc '
+                   'mô hình sức chịu tải. Không dùng để quyết định thiết kế.')
 
-with service_tab:
-    st.markdown('<div class="cl-panel-title">Tổng hợp hai giai đoạn: khởi phát và ăn mòn phát triển</div>',unsafe_allow_html=True)
-    st.markdown('<div class="cl-tab-intro">Từ thời điểm clorua đạt ngưỡng, giả định thép ăn mòn ĐỀU với mật độ dòng i_corr không đổi. '
-                'Hai mốc kết thúc do người dùng định nghĩa: độ xuyên sâu gây nứt lớp bảo vệ (µm) và tỷ lệ hao hụt diện tích '
-                'tiết diện thanh thép. Cả hai đều không phải trạng thái giới hạn chịu lực được xác minh.</div>', unsafe_allow_html=True)
-    cols=st.columns(4)
-    cols[0].metric('Đường kính thép',f'{bar_diameter:.1f} mm')
-    cols[1].metric('Mật độ dòng ăn mòn',f'{i_corr:.2f} µA/cm²')
-    cols[2].metric('Tốc độ xuyên sâu',f"{service['rate_mm_per_year']:.4f} mm/năm")
-    cols[3].metric('Độ xuyên sâu tại ngưỡng hao hụt',f"{service['penetration_limit_mm']:.3f} mm")
-    crack_cols=st.columns(3)
-    crack_cols[0].metric('Độ xuyên sâu gây nứt (giả định)',f'{crack_um:.0f} µm')
-    crack_cols[1].metric('Từ khởi phát đến nứt',f"{service['cracking_years']:.1f} năm")
-    crack_cols[2].metric('Hao hụt tiết diện khi nứt',f"{service['cracking_area_loss_pct']:.2f} %")
-    st.latex(r'v_{corr} \approx 0.0116 \, i_{corr} \quad [\mathrm{mm/year}]')
-    st.latex(r'A_{remain}/A_0 = (1-2p/d_0)^2, \quad T_{limit}=T_{init}+p_{limit}/v_{corr}, \quad T_{crack}=T_{init}+p_{crack}/v_{corr}')
-    if service['cracking_years'] < service['propagation_years']:
-        st.info(f"Mốc nứt ({service['cracking_years']:.1f} năm sau khởi phát) đến sớm hơn mốc hao hụt {area_limit}% "
-                f"({service['propagation_years']:.1f} năm). Khi lớp bảo vệ đã nứt hoặc bong, điều kiện ẩm/oxy và i_corr có thể "
-                'thay đổi nên phần diễn biến phía sau mốc nứt kém tin cậy hơn.')
-    if service['total_years'] is None:
-        st.warning('Trong giới hạn phân tích đã chọn, Cl⁻ chưa đạt ngưỡng khởi phát. '
-                   'Vì vậy KHÔNG suy diễn một thời điểm nứt hoặc hao hụt tiết diện cụ thể.')
-    else:
-        st.markdown(f"**Ví dụ hiện tại:** đạt ngưỡng Cl⁻ sau {years:.1f} năm; "
-                    f"mốc nứt giả định sau **{service['cracking_total_years']:.1f} năm**; "
-                    f"mốc hao hụt {area_limit}% tiết diện sau **{service['total_years']:.1f} năm**.")
-        trajectory = remaining_bar_history(service)
-        x_enc = alt.X(f'{COL_TIME}:Q',title='Thời gian (năm)')
-        y_enc = alt.Y(f'{COL_REMAIN}:Q',title='Tiết diện thanh thép còn lại (%)',scale=alt.Scale(domain=[0,105]))
-        chart = alt.Chart(trajectory).mark_line(color='#0c8194',strokeWidth=3).encode(
-            x=x_enc, y=y_enc,
-            tooltip=[alt.Tooltip(f'{COL_TIME}:Q',format='.1f'),
-                     alt.Tooltip(f'{COL_REMAIN}:Q',format='.2f')]
-        ).properties(height=305)
-        limit_y = alt.Chart(pd.DataFrame({COL_REMAIN:[100-area_limit]})).mark_rule(
-            color='#d49a46',strokeDash=[6,5],strokeWidth=2).encode(y=y_enc)
-        crack_x = alt.Chart(pd.DataFrame({COL_TIME:[service['cracking_total_years']]})).mark_rule(
-            color='#c2503f',strokeDash=[2,4],strokeWidth=2).encode(x=x_enc)
-        st.altair_chart(chart+limit_y+crack_x,width='stretch')
-        st.caption('Đường cam: ngưỡng hao hụt tiết diện đã chọn · Đường đỏ đứt: mốc nứt lớp bảo vệ (giả định).')
-        st.download_button('⬇ Tải diễn biến tiết diện thép (CSV)',
-            trajectory.to_csv(index=False).encode('utf-8-sig'),
-            'CloriLife_v04_steel_area_curve.csv',mime='text/csv')
-    st.markdown('**Độ nhạy theo giả định tốc độ ăn mòn**')
-    scenarios_corr = current_density_scenarios(years,bar_diameter,area_limit,
-              currents=sorted(set([0.25,0.5,1.0,2.0,5.0,round(float(i_corr),3)])),
-              cracking_penetration_um=crack_um)
-    st.dataframe(scenarios_corr,hide_index=True,width='stretch',
-                 column_config={
-                     COL_ICORR:st.column_config.NumberColumn(format='%.2f'),
-                     COL_T_CRACK:st.column_config.NumberColumn(format='%.1f'),
-                     COL_T_PROP:st.column_config.NumberColumn(format='%.1f'),
-                     COL_T_LIMIT:st.column_config.NumberColumn(format='%.1f'),
-                 })
-    st.download_button('⬇ Tải bảng độ nhạy tốc độ ăn mòn (CSV)',
-        scenarios_corr.to_csv(index=False).encode('utf-8-sig'),
-        'CloriLife_v04_corrosion_sensitivity.csv',mime='text/csv')
-    st.warning('GIỚI HẠN KHOA HỌC: Đây là chỉ số theo kịch bản với i_corr nhập vào, không phải AI '
-               'dự báo i_corr. i_corr được giữ như nhau cho mọi cấp phối, nên lợi ích của tro bay ở giai đoạn ăn mòn '
-               '(điện trở suất cao hơn) chưa được tính. Chưa xét ăn mòn rỗ cục bộ (mất tiết diện tại điểm rỗ có thể '
-               'lớn hơn nhiều giá trị trung bình), oxy/ẩm, nứt bê tông, bong lớp bảo vệ, độ bám dính, bố trí thép hoặc '
-               'mô hình sức chịu tải. Không dùng để quyết định thiết kế.')
-
-with report_tab:
-    st.markdown('<div class="cl-panel-title">Xuất báo cáo nghiên cứu PDF</div>',unsafe_allow_html=True)
-    st.markdown('<div class="cl-tab-intro">Báo cáo A4 ba trang gồm thông số, đường cong Cl⁻, mốc nứt và hao hụt thép, so sánh cấp phối và giới hạn khoa học.</div>',unsafe_allow_html=True)
-    if comparison_df.empty:
-        st.caption('Chưa có bảng so sánh hợp lệ. Mở tab “So sánh tỷ lệ tro bay” để thiết lập kịch bản trước khi xuất báo cáo.')
-    if synthetic:
-        st.warning('Báo cáo sẽ ghi rõ nguồn dữ liệu AI là MÔ PHỎNG. Không trình bày chỉ số này như kết quả thí nghiệm thật.')
-    if comparison_origin == 'BẢNG D28 GIẢ ĐỊNH / DO NGƯỜI DÙNG CHỈNH SỬA' and not comparison_df.empty:
-        st.warning('Bảng so sánh sử dụng giá trị nhập thủ công và có thể là giả định. Cần xác nhận D28 thí nghiệm trước khi công bố.')
-    params=dict(
-        fly_ash=fly_ash,wb=wb,cover=cover,cs=cs,c0=c0,critical=critical,
-        horizon=horizon,d28=d28,m=m,years=years,
-        d_source=('AI từ CSV' if mode=='AI dự báo D28 từ CSV' else 'D28 nhập thủ công'),
-        d_source_en=('AI prediction from CSV' if mode=='AI dự báo D28 từ CSV' else 'Manual D28 input'),
-        model_source=('DEMO MÔ PHỎNG' if synthetic else 'CSV do người dùng tải lên'),
-        model_source_en=('SYNTHETIC DEMO' if synthetic else 'user-uploaded CSV'),
-        synthetic=synthetic,comparison_origin=comparison_origin,
-        bar_diameter=bar_diameter, i_corr=i_corr, area_limit=area_limit,
-    )
-    try:
-        pdf=build_pdf_report(params,time_axis,chloride_axis,
-                             comparison=comparison_df if not comparison_df.empty else None,
-                             validation=metrics, propagation=service)
-        st.download_button('⬇ TẢI BÁO CÁO CLORILIFE AI v0.4.1 (PDF)',
-                           data=pdf,file_name='CloriLife_AI_v04_Research_Report.pdf',
-                           mime='application/pdf',type='primary',width='stretch')
-        st.success('Báo cáo PDF đã được tạo từ thông số và kết quả hiện tại.')
-    except Exception as exc:
-        st.error(f'Không thể tạo PDF: {exc}')
-
+    with report_tab:
+        st.markdown('<div class="cl-panel-title">Xuất báo cáo nghiên cứu PDF</div>',unsafe_allow_html=True)
+        st.markdown('<div class="cl-tab-intro">Báo cáo A4 ba trang gồm thông số, đường cong Cl⁻, mốc nứt và hao hụt thép, so sánh cấp phối và giới hạn khoa học.</div>',unsafe_allow_html=True)
+        if comparison_df.empty:
+            st.caption('Chưa có bảng so sánh hợp lệ. Mở tab “So sánh tỷ lệ tro bay” để thiết lập kịch bản trước khi xuất báo cáo.')
+        if comparison_origin == 'BẢNG D28 GIẢ ĐỊNH / DO NGƯỜI DÙNG CHỈNH SỬA' and not comparison_df.empty:
+            st.warning('Bảng so sánh sử dụng giá trị nhập thủ công và có thể là giả định. Cần xác nhận D28 thí nghiệm trước khi công bố.')
+        params=dict(
+            fly_ash=fly_ash,wb=wb,cover=cover,cs=cs,c0=c0,critical=critical,
+            horizon=horizon,d28=d28,m=m,years=years,
+            d_source='D28 nhập thủ công',d_source_en='Manual D28 input',
+            model_source=(data_label if training_bytes is not None else 'Không dùng AI'),
+            model_source_en=(data_label_en if training_bytes is not None else 'AI not used'),
+            synthetic=False,comparison_origin=comparison_origin,
+            bar_diameter=bar_diameter, i_corr=i_corr, area_limit=area_limit,
+        )
+        try:
+            pdf=build_pdf_report(params,time_axis,chloride_axis,
+                                 comparison=comparison_df if not comparison_df.empty else None,
+                                 validation=metrics, propagation=service)
+            st.download_button('⬇ TẢI BÁO CÁO CLORILIFE AI v0.4.1 (PDF)',
+                               data=pdf,file_name='CloriLife_AI_v04_Research_Report.pdf',
+                               mime='application/pdf',type='primary',width='stretch')
+            st.success('Báo cáo PDF đã được tạo từ thông số và kết quả hiện tại.')
+        except Exception as exc:
+            st.error(f'Không thể tạo PDF: {exc}')
