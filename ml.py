@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import GroupShuffleSplit, train_test_split
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit, KFold, train_test_split
 
 FEATURES = [
     'fly_ash_pct',
@@ -45,6 +45,38 @@ def clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
     return clean
 
 
+# Typical chloride diffusion coefficients of concrete are ~0.1-100 x 10^-12 m2/s.
+# A median far outside 1e-14..1e-10 m2/s almost always means a unit mix-up.
+D28_PLAUSIBLE_RANGE = (1e-14, 1e-10)
+MIN_TEST_COUNT_RELIABLE = 20
+
+
+def cross_validate_log10(X: pd.DataFrame, y: np.ndarray, groups=None):
+    """K-fold (group-aware when possible) R2 of log10(D28); None if not feasible.
+
+    Gives a less noisy view than a single small 20 % holdout. Uses a lighter
+    forest for speed; never used for the delivered model.
+    """
+    try:
+        n = len(y)
+        k = min(5, n // 6)
+        if k < 3:
+            return None
+        if groups is not None and groups.nunique() >= k:
+            splits = GroupKFold(n_splits=k).split(X, y, groups.to_numpy())
+        else:
+            splits = KFold(n_splits=k, shuffle=True, random_state=42).split(X)
+        scores = []
+        for tr, te in splits:
+            fold = RandomForestRegressor(
+                n_estimators=100, min_samples_leaf=2, random_state=42, n_jobs=-1)
+            fold.fit(X.iloc[tr], y[tr])
+            scores.append(r2_score(y[te], fold.predict(X.iloc[te])))
+        return {'mean': float(np.mean(scores)), 'std': float(np.std(scores)), 'k': int(k)}
+    except Exception:
+        return None
+
+
 def fit_model(df: pd.DataFrame):
     """Return (model, metrics, train-domain); 20% holdout, reproducible.
 
@@ -75,6 +107,17 @@ def fit_model(df: pd.DataFrame):
     observed, predicted = 10 ** ytest, 10 ** log_pred
     baseline = np.repeat(float(np.median(10 ** ytrain)), len(ytest))
     bounds = {f: (float(Xtrain[f].min()), float(Xtrain[f].max())) for f in FEATURES}
+    warnings = []
+    median_d = float(np.median(clean[TARGET]))
+    if not (D28_PLAUSIBLE_RANGE[0] <= median_d <= D28_PLAUSIBLE_RANGE[1]):
+        warnings.append(
+            f'D28 trung vị = {median_d:.2e} m²/s nằm ngoài khoảng thường gặp '
+            '(1e-14 – 1e-10 m²/s). Kiểm tra lại đơn vị: cột d28_m2_s phải tính bằng m²/s, '
+            'không phải ×10⁻¹².')
+    if len(test_ix) < MIN_TEST_COUNT_RELIABLE:
+        warnings.append(
+            f'Chỉ có {len(test_ix)} mẫu kiểm tra (< {MIN_TEST_COUNT_RELIABLE}): '
+            'MAE, RMSE và R² rất nhiễu, không nên diễn giải chi tiết.')
     metrics = {
         'n': int(len(clean)),
         'train_count': int(len(train_ix)),
@@ -95,6 +138,8 @@ def fit_model(df: pd.DataFrame):
         }).sort_values('importance', ascending=False).reset_index(drop=True),
         'filtered_rows': int(len(df) - len(clean)),
         'groups_used': groups is not None,
+        'cv_r2_log10': cross_validate_log10(X, y, groups),
+        'warnings': warnings,
     }
     return model, metrics, bounds
 

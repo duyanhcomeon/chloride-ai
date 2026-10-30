@@ -1,4 +1,4 @@
-"""Two-page, vector PDF report for the research MVP.
+"""Reproducible PDF report with conditional corrosion-scenario page.
 
 Uses system fonts when available; never ships or bundles font files.
 Falls back to an English-language PDF when no Vietnamese-capable font exists.
@@ -16,6 +16,8 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
+from corrosion import COL_REMAIN, COL_TIME, remaining_bar_history
+
 NAVY = colors.HexColor('#102a43')
 TEAL = colors.HexColor('#087f8c')
 GREEN = colors.HexColor('#137765')
@@ -31,19 +33,28 @@ def available_fonts():
         ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'),
         ('/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf', '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf'),
         ('/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf'),
+        ('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf'),
+        ('/usr/share/fonts/dejavu/DejaVuSans.ttf', '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf'),
+        ('/usr/share/fonts/TTF/DejaVuSans.ttf', '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'),
+        ('C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/arialbd.ttf'),
+        ('/System/Library/Fonts/Supplemental/Arial.ttf', '/System/Library/Fonts/Supplemental/Arial Bold.ttf'),
     ]
     for reg, bold in candidates:
         if Path(reg).exists() and Path(bold).exists():
-            if 'CLReg' not in pdfmetrics.getRegisteredFontNames():
-                pdfmetrics.registerFont(TTFont('CLReg', reg))
-                pdfmetrics.registerFont(TTFont('CLBold', bold))
-            return 'CLReg', 'CLBold', True
+            try:
+                if 'CLReg' not in pdfmetrics.getRegisteredFontNames():
+                    pdfmetrics.registerFont(TTFont('CLReg', reg))
+                    pdfmetrics.registerFont(TTFont('CLBold', bold))
+                return 'CLReg', 'CLBold', True
+            except Exception:
+                continue  # unreadable font file: try the next candidate
     return 'Helvetica', 'Helvetica-Bold', False
 
 
 def build_pdf_report(parameters: dict, time_axis, chloride_axis,
                      comparison: pd.DataFrame | None = None,
-                     validation: dict | None = None) -> bytes:
+                     validation: dict | None = None,
+                     propagation: dict | None = None) -> bytes:
     """Generate a reproducible, self-contained PDF from displayed analysis inputs.
 
     Parameters expected: fly_ash, wb, cover, cs, c0, critical, horizon,
@@ -53,7 +64,7 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
     T = (lambda vn, en: vn if utf else en)
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4, pageCompression=1)
-    c.setTitle('CloriLife AI v0.3 | Durability analysis report')
+    c.setTitle('CloriLife AI v0.4.1 | Durability and uniform corrosion scenario')
     c.setAuthor('CloriLife AI research application')
     W, H = A4
     L = 42
@@ -82,8 +93,8 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
     def footer(page):
         c.setStrokeColor(GRID)
         c.line(L, 49, R, 49)
-        txt(L, 35, 'CLORILIFE AI  /  RESEARCH PROTOTYPE v0.3', 7.3, MUTED)
-        right(R, 35, f'{page} / 2', 7.3, MUTED)
+        txt(L, 35, 'CLORILIFE AI  /  RESEARCH PROTOTYPE v0.4.1', 7.3, MUTED)
+        right(R, 35, f'{page} / {3 if propagation is not None else 2}', 7.3, MUTED)
 
     def scientific(v):
         if v is None: return '--'
@@ -99,7 +110,7 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
     c.setFillColor(TEAL)
     c.rect(0, H-151, 6, 151, stroke=0, fill=1)
     txt(L, H-47, 'CLORILIFE AI', 23, PAPER, True)
-    txt(L, H-70, 'CONCRETE DURABILITY INTELLIGENCE  |  v0.3', 9, colors.HexColor('#a8e7e3'))
+    txt(L, H-70, 'CONCRETE DURABILITY INTELLIGENCE  |  v0.4.1', 9, colors.HexColor('#a8e7e3'))
     txt(L, H-100, T('BÁO CÁO PHÂN TÍCH XÂM NHẬP CLORUA', 'CHLORIDE INGRESS ANALYSIS REPORT'), 13, PAPER, True)
     txt(L, H-122, T('Thời điểm đạt ngưỡng clorua tại cốt thép', 'Threshold arrival time at reinforcement'), 9, colors.HexColor('#d5e4ed'))
     right(R, H-37, datetime.now().strftime('%d/%m/%Y'), 8.5, colors.HexColor('#c7d9e5'))
@@ -172,7 +183,7 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
     # PAGE 2: mix comparison and method traceability
     c.setFillColor(NAVY)
     c.rect(0,H-97,W,97,stroke=0,fill=1)
-    txt(L,H-45,'CLORILIFE AI  |  v0.3',17,PAPER,True)
+    txt(L,H-45,'CLORILIFE AI  |  v0.4.1',17,PAPER,True)
     txt(L,H-69,T('So sánh cấp phối và kiểm định mô hình', 'Mix comparison and AI holdout evaluation'),9,colors.HexColor('#b9d5dd'))
     top_y = H-129
     title(top_y,'03 / MIX COMPARISON',T('So sánh các hàm lượng tro bay', 'Fly-ash dosage comparison'))
@@ -200,10 +211,16 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
         headers = [T('Tro bay','Fly ash'), 'D28 (x10^-12)', T('Đạt ngưỡng','Threshold time'), T('Cl- năm 10','Cl- year 10')]
         for i,hdr in enumerate(headers):
             txt(xs[i]+8,ty-1,hdr,8,PAPER,True)
-        for i,(_,rec) in enumerate(comparison.head(9).iterrows()):
-            y = ty-32-i*29
+        MAX_ROWS = 10
+        shown = comparison.head(MAX_ROWS)
+        row_h = 29 if len(shown) <= 6 else 22   # tighter rows keep notes clear of the footer
+        if len(comparison) > MAX_ROWS:
+            right(R, top_y-42, T(f'Hiển thị {MAX_ROWS}/{len(comparison)} dòng',
+                                 f'Showing {MAX_ROWS} of {len(comparison)} rows'), 7.5, MUTED)
+        for i,(_,rec) in enumerate(shown.iterrows()):
+            y = ty-32-i*row_h
             c.setFillColor(PALE if i%2 == 0 else PAPER)
-            c.rect(L,y-13,R-L,29,fill=1,stroke=0)
+            c.rect(L,y-row_h/2+3,R-L,row_h,fill=1,stroke=0)
             numeric = rec.get('Thời gian đạt ngưỡng (năm)')
             fields = [
                 f"{rec['Tro bay (%)']:.0f}%",
@@ -213,7 +230,7 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
             ]
             for j,value in enumerate(fields):
                 txt(xs[j]+8,y, value,8,NAVY,weight=(j==2))
-        end_table = ty-52-29*min(len(comparison),9)
+        end_table = ty-32-(len(shown)-1)*row_h-40
     else:
         txt(L,top_y-82,T('Chưa có kịch bản so sánh hợp lệ.', 'No eligible comparison cases.'),9,MUTED)
         end_table = top_y-105
@@ -247,13 +264,120 @@ def build_pdf_report(parameters: dict, time_axis, chloride_axis,
           'TCVN 12041:2017; TCVN 9346:2012; TCVN 10302:2014; ASTM C1556.'),
         T('Các tiêu chuẩn viện dẫn không có nghĩa phần mềm được chứng nhận phù hợp.',
           'Referenced standards do not imply standards compliance or certification.'),
-        T('Chưa xét ăn mòn phát triển, nứt, tải trọng hoặc độ tin cậy kết cấu.',
-          'Corrosion propagation, cracking, load capacity and reliability are not modeled.'),
+        T('Chỉ xét ăn mòn đều; chưa xét ăn mòn rỗ, nứt, tải trọng hoặc sức chịu lực.',
+          'Uniform corrosion only; no pitting, cracking or load capacity analysis.'),
         T('Các bộ dữ liệu DEMO là MÔ PHỎNG, không phải số liệu thí nghiệm.',
           'DEMO datasets are SYNTHETIC, not experimentally measured.'),
     ]
     for ix,line in enumerate(notes):
         txt(L+1, y_method-47-ix*19, '\u2022 '+line, 8.2, MUTED)
     footer(2)
+    if propagation is not None:
+        c.showPage()
+        c.setFillColor(NAVY)
+        c.rect(0, H-123, W, 123, stroke=0, fill=1)
+        c.setFillColor(TEAL)
+        c.rect(0,H-123,6,123,stroke=0,fill=1)
+        txt(L,H-46,'CLORILIFE AI  |  v0.4.1',19,PAPER,True)
+        txt(L,H-74,T('KỊCH BẢN ĂN MÒN PHÁT TRIỂN', 'UNIFORM CORROSION SCENARIO'),12,PAPER,True)
+        txt(L,H-99,T('Mốc hao hụt thép được người dùng tự chọn',
+                       'User-selected steel area-loss limit'),8.5,colors.HexColor('#bad7e5'))
+        title(H-156,'06 / TWO-STAGE INDICATOR',
+              T('Hai giai đoạn của chỉ số tuổi thọ sơ bộ',
+                'Two stages of the conditional serviceability indicator'))
+
+        p1=propagation.get('initiation_years')
+        p2=propagation['propagation_years']
+        pt=propagation.get('total_years')
+        crack_um=propagation.get('cracking_penetration_um')
+        crack_total=propagation.get('cracking_total_years')
+        crack_after=propagation.get('cracking_years')
+        unknown=T('Chưa xác định','Unknown')
+        cards=[
+            (T('KHỞI PHÁT', 'INITIATION'),
+             (f'{p1:.1f} '+T('năm','yr')) if p1 is not None else unknown),
+            (T('MỐC NỨT LỚP BẢO VỆ', 'COVER CRACKING'),
+             (f'{crack_total:.1f} '+T('năm','yr')) if crack_total is not None else unknown),
+            (T('ĂN MÒN ĐẾN NGƯỠNG', 'PROPAGATION'),f'{p2:.1f} '+T('năm','yr')),
+            (T('MỐC HAO HỤT THÉP', 'AREA LOSS LIMIT'),
+             (f'{pt:.1f} '+T('năm','yr')) if pt is not None else unknown),
+        ]
+        for j,(label,value) in enumerate(cards):
+            bx=L+j*131
+            c.setFillColor(PALE)
+            c.roundRect(bx,H-299,118,75,9,stroke=0,fill=1)
+            txt(bx+8,H-248,label,7,MUTED,True)
+            txt(bx+8,H-273,value,12.5,GREEN if j==3 else NAVY,True)
+
+        title(H-331,'07 / ASSUMPTIONS',
+              T('Thông số và quy tắc suy giảm tiết diện thép',
+                'Inputs and uniform bar area-loss model'))
+        inputs = [
+            (T('Đường kính thanh thép', 'Bar diameter'),f"{propagation['diameter_mm']:.1f} mm"),
+            (T('Mật độ dòng ăn mòn', 'Corrosion current density'), f"{propagation['current_density_uA_cm2']:.2f} µA/cm²" if utf else f"{propagation['current_density_uA_cm2']:.2f} uA/cm2"),
+            (T('Ngưỡng hao hụt tiết diện', 'Area loss limit'),f"{propagation['area_loss_limit_pct']:.1f} %"),
+            (T('Tốc độ xuyên sâu', 'Penetration rate'),f"{propagation['rate_mm_per_year']:.4f} mm/"+T('năm','yr')),
+            (T('Độ xuyên sâu tại ngưỡng', 'Penetration at threshold'),f"{propagation['penetration_limit_mm']:.3f} mm"),
+        ]
+        if crack_um is not None:
+            inputs.append((T('Độ xuyên sâu gây nứt (giả định)', 'Cracking penetration (assumed)'),
+                           f"{crack_um:.0f} " + ('µm' if utf else 'um') +
+                           (f" ({crack_after:.1f} " + T('năm sau khởi phát', 'yr after initiation') + ')'
+                            if crack_after is not None else '')))
+        for i,(label,value) in enumerate(inputs):
+            row(L,H-381-i*24,label,value,width=510)
+
+        title(H-532,'08 / BAR AREA RETENTION',
+              T('Diễn biến tiết diện cốt thép còn lại',
+                'Remaining reinforcing bar area over time'))
+        if pt is not None:
+            trajectory=remaining_bar_history(propagation, n=230)
+            tt=np.asarray(trajectory[COL_TIME],dtype=float)
+            rr=np.asarray(trajectory[COL_REMAIN],dtype=float)
+            gx,gy,gw,gh=L+27,157,438,104
+            c.setStrokeColor(GRID)
+            for k in range(5):
+                y=gy+gh*k/4
+                c.line(gx,y,gx+gw,y)
+                right(gx-7,y-3,f'{100*k/4:.0f}%',7,MUTED)
+            tmax=max(float(tt[-1]),1.0)
+            for k in range(5):
+                x=gx+gw*k/4
+                txt(x-3,gy-16,f'{tmax*k/4:.0f}',7,MUTED)
+            lim=100-propagation['area_loss_limit_pct']
+            c.setStrokeColor(colors.HexColor('#e4a14e'))
+            c.setLineWidth(1.3)
+            c.setDash(4,3)
+            c.line(gx,gy+gh*lim/100,gx+gw,gy+gh*lim/100)
+            c.setDash()
+            c.setStrokeColor(TEAL)
+            c.setLineWidth(1.85)
+            curve=c.beginPath()
+            for k,(t,r) in enumerate(zip(tt,rr)):
+                x=gx+gw*t/tmax
+                y=gy+gh*r/100
+                if k==0: curve.moveTo(x,y)
+                else: curve.lineTo(x,y)
+            c.drawPath(curve)
+            if crack_total is not None and 0 <= crack_total <= tmax:
+                cx=gx+gw*crack_total/tmax
+                c.setStrokeColor(colors.HexColor('#c2503f'))
+                c.setLineWidth(1.2)
+                c.setDash(2,3)
+                c.line(cx,gy,cx,gy+gh)
+                c.setDash()
+                txt(min(cx+3,gx+gw-60),gy+gh-9,T('nứt','cracking'),7,colors.HexColor('#c2503f'),True)
+            txt(gx,gy-34,T('Xanh: tiết diện còn lại | Cam đứt: ngưỡng hao hụt | Đỏ đứt: mốc nứt giả định',
+                           'Teal: remaining area | Orange: area-loss limit | Red: assumed cracking'),8,MUTED)
+        else:
+            txt(L,218,T('Chưa đạt ngưỡng clorua trong khoảng phân tích; không có mốc cuối.',
+                        'Chloride threshold not reached within horizon; endpoint unknown.'),9,AMBER)
+
+        c.setFillColor(PALE)
+        c.roundRect(L,72,R-L,45,8,stroke=0,fill=1)
+        txt(L+10,100,T('CƠ SỞ', 'BASIS')+': Faraday; ASTM G102-23 (conversion of electrochemical corrosion rates).',8,NAVY,True)
+        txt(L+10,84,T('KHÔNG xét nứt, rỗ, bám dính, nội lực, sức chịu tải hoặc an toàn công trình.',
+                       'NO cracking, pitting, bond, loads, remaining strength or structural safety assessment.'),7.4,AMBER,True)
+        footer(3)
     c.save()
     return buf.getvalue()
