@@ -1,4 +1,4 @@
-"""CloriLife AI v0.8 — forward/inverse RCM ML + conditional time-to-limit AI.
+"""CloriLife AI v0.9 — forward/inverse RCM ML + conditional time-to-limit AI.
 
 No Fick diffusion is used. The service-life module is trained ONLY on a separately
 uploaded verified time-to-event dataset; the 215-row RCM dataset has no time labels.
@@ -18,6 +18,7 @@ import streamlit as st
 
 from inverse_design import MODES, PREFERENCES, inverse_search, training_pairs
 from lifespan_ui import render_lifespan_tab
+from literature_ui import render_literature_tab
 
 from rcm_training import (
     AUTO,
@@ -84,7 +85,7 @@ def load_table(csv_bytes: bytes):
 
 with st.sidebar:
     st.markdown('## CloriLife AI')
-    st.caption('v0.8 · THUẬN + NGƯỢC + AI TUỔI THỌ · MACHINE LEARNING')
+    st.caption('v0.9 · THUẬN + NGƯỢC + AI TUỔI THỌ · MACHINE LEARNING')
     st.divider()
     st.markdown('**1. Nguồn dữ liệu**')
     source = st.radio('Bộ dữ liệu',
@@ -109,7 +110,7 @@ with st.sidebar:
 
 st.markdown('''
 <div class="cl-hero">
-  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v0.8</div>
+  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v0.9</div>
   <div class="cl-title">CloriLife <b>AI</b></div>
   <div class="cl-sub">Dự báo hệ số di chuyển ion clorua bằng <b>9 thuật toán học máy</b>
   trên dữ liệu thí nghiệm bê tông sử dụng tro bay. Hỗ trợ cả <b>bài toán thuận</b>
@@ -141,12 +142,14 @@ if result is None:
     tabs = st.tabs([
         '\U0001f4ca So s\u00e1nh 9 m\u00f4 h\u00ecnh', '\U0001f9ea D\u1ef1 b\u00e1o thu\u1eadn', '\U0001f501 Thi\u1ebft k\u1ebf ng\u01b0\u1ee3c',
         '\U0001f4da D\u1eef li\u1ec7u v\u00e0 ngu\u1ed3n', '\U0001f4cb Ph\u01b0\u01a1ng ph\u00e1p & xu\u1ea5t k\u1ebft qu\u1ea3',
-        '⏳ Tuổi thọ AI'])
-    for tab in tabs[:-1]:
+        '⏳ Tuổi thọ AI', '🔬 Thư viện nghiên cứu'])
+    for tab in tabs[:-2]:
         with tab:
             st.info('C\u1ea7n b\u1ed9 d\u1eef li\u1ec7u h\u1ee3p l\u1ec7 \u0111\u1ec3 hi\u1ec3n th\u1ecb n\u1ed9i dung tab n\u00e0y.')
-    with tabs[-1]:
+    with tabs[-2]:
         render_lifespan_tab(rcm_result=None)
+    with tabs[-1]:
+        render_literature_tab(ROOT)
     st.markdown('**D\u1eef li\u1ec7u g\u1ed1c:** '+SOURCE_URL)
 else:
     best = result['best_cv']
@@ -163,10 +166,10 @@ else:
             'Đây không phải hệ số khuếch tán biểu kiến D_app và không phải tuổi thọ công trình. '
             'Mô hình chưa được xác nhận để dùng cho hồ sơ thiết kế.')
 
-    model_tab, prediction_tab, inverse_tab, data_tab, method_tab, lifetime_tab = st.tabs([
+    model_tab, prediction_tab, inverse_tab, data_tab, method_tab, lifetime_tab, research_tab = st.tabs([
         '📊 So sánh 9 mô hình', '🧪 Dự báo thuận', '🔁 Thiết kế ngược',
         '📚 Dữ liệu và nguồn', '📋 Phương pháp & xuất kết quả',
-        '⏳ Tuổi thọ AI'
+        '⏳ Tuổi thọ AI', '🔬 Thư viện nghiên cứu'
     ])
 
     with model_tab:
@@ -458,7 +461,7 @@ else:
         st.markdown('**Biến đích:** D_RCM,28 (m²/s), theo phương pháp Rapid Chloride Migration.')
         st.caption('Một số mô hình được cấu hình sẵn phục vụ đối chứng; tập holdout không được sử dụng để chọn tham số hay chọn thuật toán.')
         report = (
-            'CLORILIFE AI v0.8 - BAO CAO TOM TAT\n'
+            'CLORILIFE AI v0.9 - BAO CAO TOM TAT\n'
             'Phuong phap: Machine Learning, KHONG SU DUNG FICK\n'
             f'Nguon du lieu: {SOURCE_URL}\n'
             f'So mau: {result["total_count"]}; so nhom nguon: {dataset["source_group"].nunique()}\n'
@@ -475,5 +478,8 @@ else:
     with lifetime_tab:
         render_lifespan_tab(rcm_result=result)
 
-    st.markdown('<div class="cl-foot">CloriLife AI v0.8 · Thuận + ngược · Research demo · Dữ liệu RCM được công bố · '
+    with research_tab:
+        render_literature_tab(ROOT)
+
+    st.markdown('<div class="cl-foot">CloriLife AI v0.9 · Thuận + ngược · Research demo · Dữ liệu RCM được công bố · '
                 'Tuổi thọ AI chỉ khi có nhãn thời gian quan sát thực; không dùng quyết định thiết kế</div>',unsafe_allow_html=True)

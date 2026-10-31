@@ -1,6 +1,6 @@
-# CLORILIFE AI v0.8 - THUAN + NGUOC + TUOI THO AI CO NHAN THUC
+# CLORILIFE AI v0.9 - THUAN + NGUOC + TUOI THO AI CO NHAN THUC
 
-# CloriLife AI v0.8 — học máy với bài toán thuận và bài toán ngược
+# CloriLife AI v0.9 — học máy với bài toán thuận và bài toán ngược
 
 **Nền tảng nghiên cứu bê tông tro bay: 215 mẫu RCM thực nghiệm, 9 thuật toán học máy. KHÔNG dùng định luật Fick.**
 
@@ -108,3 +108,18 @@ in this environment (Streamlit package unavailable); run it after deployment.
 - Chi nhan nhan cung mot `limit_state`; mo hinh chon theo CV, kiem tra nguon doc lap o holdout.
 - Xu ly de xuat thiet ke ngược RCM giu nguyen v0.7.1.
 - Chi tiet xem `README_TUOI_THO_AI.md`.
+
+
+## v0.9: Thu vien nghien cuu thoi gian khoi phat an mon (31/10/2026)
+
+Them tab **🔬 Thư viện nghiên cứu**: 14 nguon tai lieu, 19 dong ket qua thoi gian khoi phat tu ba nghien cuu doc lap, loc va bieu do theo nguon, tai CSV.
+
+- `research_sources_14.csv`: 14 URL DOI / duong dan bao cao, voi trang thai doi chieu.
+- `corrosion_initiation_19_groups.csv`: 19 dong cap phoi/trung binh nhom, bao gom nhan, don vi goc, nguon va giao thuc.
+- `research_catalog.py`: kiem tra nhan, so luong, tinh nhat quan cua quy doi gio/ngay va truy xuat nguon.
+- `literature_ui.py`: giao dien khong tham gia huan luyen ML.
+- `README_NGHIEN_CUU_v09.md`: giai thich day du va danh sach 14 link nghien cuu.
+
+**Canh bao:** 19 dong khong phai 19 mau thu doc lap; chi co ba cong bo, nhieu giao thuc va thieu cac bien thoi gian tuoi tho ket cau. Tab Tuoi tho AI van yeu cau dataset rieng co nhan. KHONG dung Fick.
+
+Kiem thu: `python -m pytest -q tests` (35 kiem thu)
