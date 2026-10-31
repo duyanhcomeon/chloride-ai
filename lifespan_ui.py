@@ -1,4 +1,4 @@
-"""CloriLife AI v1.0 survival analysis and experimental evidence dashboard."""
+"""CloriLife AI v1.1 survival analysis and experimental evidence dashboard."""
 from __future__ import annotations
 
 from io import BytesIO
@@ -51,6 +51,18 @@ def _render_sources():
     st.download_button('⬇ Tải danh mục DOI / nguồn thí nghiệm',
                        data=df.to_csv(index=False).encode('utf-8-sig'),
                        file_name='CloriLife_v10_Nguon_Thuc_Nghiem.csv', mime='text/csv')
+
+    st.markdown('#### Nguồn nghiên cứu được đối chiếu bổ sung đến 31/10/2026')
+    latest = pd.read_csv(ROOT / 'research_sources' / 'NEW_SOURCES_OCT_2026.csv')
+    st.dataframe(latest[['year','authors','topic','measurements_available',
+                         'ready_for_lifetime_training','url']], hide_index=True,
+                 use_container_width=True,
+                 column_config={'url': st.column_config.LinkColumn('DOI / nguồn')})
+    st.download_button('⬇ Tải danh mục nguồn đối chiếu mới',
+                       latest.to_csv(index=False).encode('utf-8-sig'),
+                       file_name='CloriLife_NguonMoi_31_10_2026.csv', mime='text/csv')
+    st.caption('Nguồn mới là tài liệu có thể truy cập qua DOI; KHÔNG có bản ghi nào được tự động nhập thành nhãn tuổi thọ. '
+               'Nếu thiếu nguyên bản của một bộ dữ liệu, mục đo lường được trình bày dưới dạng mô tả kho và cần kiểm tra trước khi học.')
 
     st.markdown('#### Dữ liệu RCM quốc tế bổ sung (chưa có nhãn tuổi thọ)')
     more1, more2 = st.columns(2)

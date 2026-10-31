@@ -85,7 +85,7 @@ def load_table(csv_bytes: bytes):
 
 with st.sidebar:
     st.markdown('## CloriLife AI')
-    st.caption('v1.0 · THUẬN + NGƯỢC + AI TUỔI THỌ · MACHINE LEARNING')
+    st.caption('v1.1 · THUẬN + NGƯỢC + AI TUỔI THỌ · MACHINE LEARNING')
     st.divider()
     st.markdown('**1. Nguồn dữ liệu**')
     source = st.radio('Bộ dữ liệu',
@@ -110,7 +110,7 @@ with st.sidebar:
 
 st.markdown('''
 <div class="cl-hero">
-  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v1.0</div>
+  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v1.1</div>
   <div class="cl-title">CloriLife <b>AI</b></div>
   <div class="cl-sub">Dự báo hệ số di chuyển ion clorua bằng <b>9 thuật toán học máy</b>
   trên dữ liệu thí nghiệm bê tông sử dụng tro bay. Hỗ trợ cả <b>bài toán thuận</b>
