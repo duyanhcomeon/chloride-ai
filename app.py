@@ -1,7 +1,7 @@
-"""CloriLife AI v0.9 — forward/inverse RCM ML + conditional time-to-limit AI.
+"""CloriLife AI v1.0 — RCM ML plus censored survival ML and inverse research design.
 
-No Fick diffusion is used. The service-life module is trained ONLY on a separately
-uploaded verified time-to-event dataset; the 215-row RCM dataset has no time labels.
+No Fick diffusion is used. The survival module handles event/censored records
+from separately uploaded traceable cohorts; 215-row RCM dataset has no time labels.
 """
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def load_table(csv_bytes: bytes):
 
 with st.sidebar:
     st.markdown('## CloriLife AI')
-    st.caption('v0.9 · THUẬN + NGƯỢC + AI TUỔI THỌ · MACHINE LEARNING')
+    st.caption('v1.0 · THUẬN + NGƯỢC + AI TUỔI THỌ · MACHINE LEARNING')
     st.divider()
     st.markdown('**1. Nguồn dữ liệu**')
     source = st.radio('Bộ dữ liệu',
@@ -105,18 +105,19 @@ with st.sidebar:
     st.markdown('**3. Nguyên tắc kiểm định**')
     st.caption('Tách ~20% theo nhóm nguồn nghiên cứu làm holdout. '
                'Phần còn lại dùng 5-fold GroupKFold để xếp hạng thuật toán.')
-    st.caption('RCM thực nghiệm KHÔNG có nhãn tuổi thọ. Tab mới nhận CSV tuổi thọ có nhãn riêng, không dùng Fick.')
+    st.caption('RCM không có nhãn tuổi thọ. Survival v1.0 xử lý cả mẫu đã ăn mòn và chưa ăn mòn, cần CSV độc lập có nguồn.')
     st.markdown(f'[Nguồn dữ liệu gốc (Dryad)]({SOURCE_URL})')
 
 st.markdown('''
 <div class="cl-hero">
-  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v0.9</div>
+  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v1.0</div>
   <div class="cl-title">CloriLife <b>AI</b></div>
   <div class="cl-sub">Dự báo hệ số di chuyển ion clorua bằng <b>9 thuật toán học máy</b>
   trên dữ liệu thí nghiệm bê tông sử dụng tro bay. Hỗ trợ cả <b>bài toán thuận</b>
-  và <b>bài toán ngược</b> để tìm cấp phối theo giới hạn RCM mục tiêu;
-  <b>không sử dụng định luật Fick</b>. Tab tuổi thọ AI được huấn luyện riêng
-  khi có dữ liệu thời gian hư hỏng thực nghiệm có nhãn.</div>
+  và <b>bài toán ngược</b> để tìm cấp phối theo giới hạn RCM mục tiêu.
+  Mô-đun <b>Survival AI</b> so sánh 3 thuật toán (Cox, Random Forest, Gradient Boosting),
+  xử lý mẫu chưa ăn mòn và dự báo theo mốc thời gian khi có dữ liệu tuổi thọ hợp lệ;
+  <b>không sử dụng định luật Fick</b>.</div>
   <div class="cl-pills"><span class="cl-pill">DỮ LIỆU THỰC</span>
   <span class="cl-pill">9 THUẬT TOÁN</span>
   <span class="cl-pill">KIỂM ĐỊNH THEO NGUỒN</span>
@@ -452,16 +453,18 @@ else:
     7. **Bài toán ngược:** nhập ngưỡng D_RCM,28; tìm nhiều tổ hợp tro bay và N/CKD khả thi theo mô hình, ở trong miền lồi và gần các mẫu thực nghiệm cùng loại vật liệu.
     8. Thí nghiệm xác nhận mọi phương án được đề xuất; không dùng kết quả mô hình thay thế thiết kế cấp phối.
 
-    **Giới hạn khoa học:** Dữ liệu RCM không trực tiếp cho nhãn tuổi thọ. Tab mới chỉ
-    dự báo thời gian đến trạng thái giới hạn **khi tải riêng dữ liệu thời gian quan sát có nhãn**.
-    Không thay thế đánh giá năng lực chịu lực và kiểm định công trình.
+    **Chức năng tuổi thọ v1.0:** Mô hình Cox và học máy survival xử lý kiểm duyệt phải,
+    tách riêng loại sự kiện và quy trình phơi nhiễm, kiểm định theo nguồn.
+    **Giới hạn khoa học:** Dữ liệu RCM không trực tiếp cho nhãn tuổi thọ.
+    Chỉ dự báo thời gian đến trạng thái giới hạn **khi tải riêng dữ liệu quan sát có nhãn**
+    và holdout đạt ngưỡng tối thiểu. Không thay thế đánh giá chịu lực hay thiết kế độ bền lâu.
     ''')
         st.markdown('**Các thuật toán đang hỗ trợ:** '+', '.join(MODELS)+'.')
         st.markdown('**Thông số đầu vào thực sự dùng:** Tro bay (%), N/CKD, loại xi măng, cấp tro bay.')
         st.markdown('**Biến đích:** D_RCM,28 (m²/s), theo phương pháp Rapid Chloride Migration.')
         st.caption('Một số mô hình được cấu hình sẵn phục vụ đối chứng; tập holdout không được sử dụng để chọn tham số hay chọn thuật toán.')
         report = (
-            'CLORILIFE AI v0.9 - BAO CAO TOM TAT\n'
+            'CLORILIFE AI v1.0 - BAO CAO TOM TAT\n'
             'Phuong phap: Machine Learning, KHONG SU DUNG FICK\n'
             f'Nguon du lieu: {SOURCE_URL}\n'
             f'So mau: {result["total_count"]}; so nhom nguon: {dataset["source_group"].nunique()}\n'
@@ -481,5 +484,5 @@ else:
     with research_tab:
         render_literature_tab(ROOT)
 
-    st.markdown('<div class="cl-foot">CloriLife AI v0.9 · Thuận + ngược · Research demo · Dữ liệu RCM được công bố · '
-                'Tuổi thọ AI chỉ khi có nhãn thời gian quan sát thực; không dùng quyết định thiết kế</div>',unsafe_allow_html=True)
+    st.markdown('<div class="cl-foot">CloriLife AI v1.0 · Thuận + ngược · Research demo · Dữ liệu RCM được công bố · '
+                'Survival AI cần dữ liệu thực + kiểm định theo nguồn; không dùng quyết định thiết kế</div>',unsafe_allow_html=True)

@@ -1,0 +1,13 @@
+CLORILIFE AI v1.0 - BAO CAO KIEM THU MA NGUON
+Ngay: 31/10/2026
+
+- Kiem thu PyTest: 48/48 PASS.
+- 9 mo hinh RCM, nghiem nguoc, doc du lieu va xu ly nguon: cac test v0.9 PASS.
+- Survival v1.0: Cox PH, RF Survival, Gradient Boosting Survival tren TAP DU LIEU GIA LAP CHO TEST: PASS.
+- Mau censored duoc giu, khong tu gan nhan su kien; tach train/holdout theo study: PASS.
+- Ranh gioi thoi gian, min/max dau vao va bao loi cap phoi cho bai toan nguoc: PASS.
+- Huan luyen va du bao nghiem ngat tren du lieu thuc tuoi tho hien truong: CHUA THE DANH GIA vi chua co du bo du lieu co nhan goc.
+- Streamlit UI: DA KIEM TRA CU PHAP/IMPORT TINH; CHUA KIEM TRA GUI THUC SU do khong the cai Streamlit trong moi truong hien tai (mang pip khong truy cap duoc).
+- KHONG co ket qua C-index holdout thuc nghiem tuoi tho nao duoc tu xung da duoc chung minh.
+
+TAP DU LIEU GIA LAP TEST chi nam trong tests/test_survival_ml.py, khong phai ket qua nghien cuu.

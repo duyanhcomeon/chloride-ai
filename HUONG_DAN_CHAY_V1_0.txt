@@ -1,0 +1,18 @@
+CLORILIFE AI v1.0 - HUONG DAN SU DUNG NHANH
+Ngay cap nhat: 31/10/2026
+
+1. Giai nen ZIP, KHONG chay truc tiep file trong ZIP.
+2. Cai Python 3.12/3.13 va them Python vao PATH.
+3. Nhap dup CHAY_CLORILIFE_WINDOWS.bat (Windows) hoac trong CMD/PowerShell:
+   python -m pip install -r requirements.txt
+   python -m streamlit run app.py
+4. Mo trinh duyet, truy cap http://localhost:8501
+5. Chon tab RCM neu muon xem 215 mau va thiet ke nguoc he so RCM.
+6. Chon Tuoi tho AI -> Nguon thi nghiem de xem 12 tai lieu quoc te va 19 ban ghi gia toc.
+7. Chon Tuoi tho AI -> Survival neu co bo du lieu thoi gian an mon theo mau.
+   Tai CSV mau trong giao dien, dien du lieu thuc va DOI tung dong.
+8. Neu khong du 40 mau + 8 nghien cuu + 12 su kien, phan mem se tu choi huan luyen.
+
+KHONG suy ra tuoi tho tu 215 RCM hoac 19 dong gia toc. KHONG nhan mot mo hinh
+chua co du lieu thuc la du bao tuoi tho 50/75/100 nam.
+Xem README.md de biet cac gioi han khoa hoc va cach kiem dinh.

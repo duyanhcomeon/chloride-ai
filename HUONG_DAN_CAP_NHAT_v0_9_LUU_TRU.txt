@@ -1,0 +1,13 @@
+CLORILIFE AI v0.9 - CAP NHAT THU VIEN NGHIEN CUU
+
+1) Giai nen CloriLife_AI_v0_9_Research_GitHub_Update.zip.
+2) Trong repository GitHub cua CloriLife AI v0.8, tai toan bo file tu ZIP vao THU MUC GOC (giu tests/).
+3) Neu trung ten app.py, README.md, HUONG_DAN_CAP_NHAT.txt: chon thay the noi dung file cu, KHONG tao file trung ten.
+4) Commit, sau do mo Streamlit Cloud va kiem tra tab: 'Thu vien nghien cuu'.
+5) Tab moi gom 14 nguon, 19 dong so lieu nhom, 3 nghien cuu co thoi gian khoi phat. Co nut tai CSV.
+6) 19 dong KHONG duoc dung de huan luyen AI tuoi tho, KHONG la nhan tuoi tho cong trinh, KHONG dung Fick.
+7) Neu can cai moi: dung ZIP Full_Source va chay streamlit run app.py.
+
+Du lieu tuoi tho thanhsu: chi hoc khi CSV rieng co nhan thoi gian su kien, nguon doc lap va bien dau vao tuong thich.
+Kiem thu: python -m pytest -q tests
+Giao dien Streamlit Cloud can duoc xac nhan sau khi nguoi dung cap nhat; nguoi tao khong tu dong sua GitHub.
