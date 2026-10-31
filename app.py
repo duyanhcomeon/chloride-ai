@@ -1,8 +1,7 @@
-"""CloriLife AI v0.7.1 — forward and inverse machine learning on real RCM test data.
+"""CloriLife AI v0.8 — forward/inverse RCM ML + conditional time-to-limit AI.
 
-The app does NOT implement Fick diffusion, chloride ingress or service-life
-prediction. It estimates the 28-day RCM migration coefficient of fly-ash
-concrete from a published, source-traceable experimental dataset.
+No Fick diffusion is used. The service-life module is trained ONLY on a separately
+uploaded verified time-to-event dataset; the 215-row RCM dataset has no time labels.
 """
 from __future__ import annotations
 
@@ -18,6 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from inverse_design import MODES, PREFERENCES, inverse_search, training_pairs
+from lifespan_ui import render_lifespan_tab
 
 from rcm_training import (
     AUTO,
@@ -84,7 +84,7 @@ def load_table(csv_bytes: bytes):
 
 with st.sidebar:
     st.markdown('## CloriLife AI')
-    st.caption('v0.7.1 · THUẬN + NGƯỢC · MACHINE LEARNING')
+    st.caption('v0.8 · THUẬN + NGƯỢC + AI TUỔI THỌ · MACHINE LEARNING')
     st.divider()
     st.markdown('**1. Nguồn dữ liệu**')
     source = st.radio('Bộ dữ liệu',
@@ -104,21 +104,22 @@ with st.sidebar:
     st.markdown('**3. Nguyên tắc kiểm định**')
     st.caption('Tách ~20% theo nhóm nguồn nghiên cứu làm holdout. '
                'Phần còn lại dùng 5-fold GroupKFold để xếp hạng thuật toán.')
-    st.caption('Không tính thời gian khởi phát ăn mòn hoặc tuổi thọ kết cấu.')
+    st.caption('RCM thực nghiệm KHÔNG có nhãn tuổi thọ. Tab mới nhận CSV tuổi thọ có nhãn riêng, không dùng Fick.')
     st.markdown(f'[Nguồn dữ liệu gốc (Dryad)]({SOURCE_URL})')
 
 st.markdown('''
 <div class="cl-hero">
-  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v0.7.1</div>
+  <div class="cl-kicker">RESEARCH PLATFORM · CONCRETE MATERIALS · v0.8</div>
   <div class="cl-title">CloriLife <b>AI</b></div>
   <div class="cl-sub">Dự báo hệ số di chuyển ion clorua bằng <b>9 thuật toán học máy</b>
   trên dữ liệu thí nghiệm bê tông sử dụng tro bay. Hỗ trợ cả <b>bài toán thuận</b>
   và <b>bài toán ngược</b> để tìm cấp phối theo giới hạn RCM mục tiêu;
-  không sử dụng định luật Fick.</div>
+  <b>không sử dụng định luật Fick</b>. Tab tuổi thọ AI được huấn luyện riêng
+  khi có dữ liệu thời gian hư hỏng thực nghiệm có nhãn.</div>
   <div class="cl-pills"><span class="cl-pill">DỮ LIỆU THỰC</span>
   <span class="cl-pill">9 THUẬT TOÁN</span>
   <span class="cl-pill">KIỂM ĐỊNH THEO NGUỒN</span>
-  <span class="cl-pill">THIẾT KẾ NGƯỢC CÓ RÀNG BUỘC</span></div>
+  <span class="cl-pill">THIẾT KẾ NGƯỢC CÓ RÀNG BUỘC</span><span class="cl-pill">TUỔI THỌ AI · CẦN NHÃN THỰC</span></div>
 </div>
 ''', unsafe_allow_html=True)
 
@@ -139,10 +140,13 @@ if training_error:
 if result is None:
     tabs = st.tabs([
         '\U0001f4ca So s\u00e1nh 9 m\u00f4 h\u00ecnh', '\U0001f9ea D\u1ef1 b\u00e1o thu\u1eadn', '\U0001f501 Thi\u1ebft k\u1ebf ng\u01b0\u1ee3c',
-        '\U0001f4da D\u1eef li\u1ec7u v\u00e0 ngu\u1ed3n', '\U0001f4cb Ph\u01b0\u01a1ng ph\u00e1p & xu\u1ea5t k\u1ebft qu\u1ea3'])
-    for tab in tabs:
+        '\U0001f4da D\u1eef li\u1ec7u v\u00e0 ngu\u1ed3n', '\U0001f4cb Ph\u01b0\u01a1ng ph\u00e1p & xu\u1ea5t k\u1ebft qu\u1ea3',
+        '⏳ Tuổi thọ AI'])
+    for tab in tabs[:-1]:
         with tab:
             st.info('C\u1ea7n b\u1ed9 d\u1eef li\u1ec7u h\u1ee3p l\u1ec7 \u0111\u1ec3 hi\u1ec3n th\u1ecb n\u1ed9i dung tab n\u00e0y.')
+    with tabs[-1]:
+        render_lifespan_tab(rcm_result=None)
     st.markdown('**D\u1eef li\u1ec7u g\u1ed1c:** '+SOURCE_URL)
 else:
     best = result['best_cv']
@@ -159,9 +163,10 @@ else:
             'Đây không phải hệ số khuếch tán biểu kiến D_app và không phải tuổi thọ công trình. '
             'Mô hình chưa được xác nhận để dùng cho hồ sơ thiết kế.')
 
-    model_tab, prediction_tab, inverse_tab, data_tab, method_tab = st.tabs([
+    model_tab, prediction_tab, inverse_tab, data_tab, method_tab, lifetime_tab = st.tabs([
         '📊 So sánh 9 mô hình', '🧪 Dự báo thuận', '🔁 Thiết kế ngược',
-        '📚 Dữ liệu và nguồn', '📋 Phương pháp & xuất kết quả'
+        '📚 Dữ liệu và nguồn', '📋 Phương pháp & xuất kết quả',
+        '⏳ Tuổi thọ AI'
     ])
 
     with model_tab:
@@ -444,15 +449,16 @@ else:
     7. **Bài toán ngược:** nhập ngưỡng D_RCM,28; tìm nhiều tổ hợp tro bay và N/CKD khả thi theo mô hình, ở trong miền lồi và gần các mẫu thực nghiệm cùng loại vật liệu.
     8. Thí nghiệm xác nhận mọi phương án được đề xuất; không dùng kết quả mô hình thay thế thiết kế cấp phối.
 
-    **Giới hạn khoa học:** Không đánh giá năng lực chịu lực, tuổi thọ kết cấu, nứt và phá hoại;
-    không suy diễn mô hình trên công trình nếu chưa có kiểm chứng độc lập.
+    **Giới hạn khoa học:** Dữ liệu RCM không trực tiếp cho nhãn tuổi thọ. Tab mới chỉ
+    dự báo thời gian đến trạng thái giới hạn **khi tải riêng dữ liệu thời gian quan sát có nhãn**.
+    Không thay thế đánh giá năng lực chịu lực và kiểm định công trình.
     ''')
         st.markdown('**Các thuật toán đang hỗ trợ:** '+', '.join(MODELS)+'.')
         st.markdown('**Thông số đầu vào thực sự dùng:** Tro bay (%), N/CKD, loại xi măng, cấp tro bay.')
         st.markdown('**Biến đích:** D_RCM,28 (m²/s), theo phương pháp Rapid Chloride Migration.')
         st.caption('Một số mô hình được cấu hình sẵn phục vụ đối chứng; tập holdout không được sử dụng để chọn tham số hay chọn thuật toán.')
         report = (
-            'CLORILIFE AI v0.7.1 - BAO CAO TOM TAT\n'
+            'CLORILIFE AI v0.8 - BAO CAO TOM TAT\n'
             'Phuong phap: Machine Learning, KHONG SU DUNG FICK\n'
             f'Nguon du lieu: {SOURCE_URL}\n'
             f'So mau: {result["total_count"]}; so nhom nguon: {dataset["source_group"].nunique()}\n'
@@ -466,5 +472,8 @@ else:
         st.download_button('⬇ Tải bản tóm tắt kết quả (TXT)',
             report.encode('utf-8-sig'), file_name='CloriLife_ML_only_tomtat.txt',mime='text/plain')
 
-    st.markdown('<div class="cl-foot">CloriLife AI v0.7.1 · Thuận + ngược · Research demo · Dữ liệu RCM được công bố · '
-                'Không sử dụng để quyết định thiết kế hoặc tuổi thọ công trình</div>',unsafe_allow_html=True)
+    with lifetime_tab:
+        render_lifespan_tab(rcm_result=result)
+
+    st.markdown('<div class="cl-foot">CloriLife AI v0.8 · Thuận + ngược · Research demo · Dữ liệu RCM được công bố · '
+                'Tuổi thọ AI chỉ khi có nhãn thời gian quan sát thực; không dùng quyết định thiết kế</div>',unsafe_allow_html=True)

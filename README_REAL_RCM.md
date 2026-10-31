@@ -1,4 +1,4 @@
-# Nguồn dữ liệu RCM thực nghiệm và nguyên tắc sử dụng — CloriLife AI v0.7.1
+# Nguồn dữ liệu RCM thực nghiệm và nguyên tắc sử dụng — CloriLife AI v0.8
 
 **Dữ liệu:** Yang, Zhu và Wei; Excel thí nghiệm RCM được công bố tại https://doi.org/10.5061/dryad.66t1g1k6j.
 

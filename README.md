@@ -1,4 +1,6 @@
-# CloriLife AI v0.7.1 — học máy với bài toán thuận và bài toán ngược
+# CLORILIFE AI v0.8 - THUAN + NGUOC + TUOI THO AI CO NHAN THUC
+
+# CloriLife AI v0.8 — học máy với bài toán thuận và bài toán ngược
 
 **Nền tảng nghiên cứu bê tông tro bay: 215 mẫu RCM thực nghiệm, 9 thuật toán học máy. KHÔNG dùng định luật Fick.**
 
@@ -13,7 +15,7 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-Deploy: tải các tệp vào **thư mục gốc repository GitHub** của Streamlit Cloud, `app.py` là tệp khởi chạy. Gói ZIP cập nhật v0.7.1 dùng cho website đã chạy v0.6; gói toàn bộ mã nguồn dùng cho cài mới.
+Deploy: tải các tệp vào **thư mục gốc repository GitHub** của Streamlit Cloud, `app.py` là tệp khởi chạy. Gói ZIP cập nhật v0.8 dùng cho website đã chạy v0.6; gói toàn bộ mã nguồn dùng cho cài mới.
 
 ## Bài toán thuận
 
@@ -70,7 +72,7 @@ python -m pytest -q tests/test_inverse_design.py tests/test_ml_only.py
 Mã nền: `rcm_training.py`; mô-đun mới: `inverse_design.py`; giao diện: `app.py`. Không cần `physics.py`, `corrosion.py` hay các mô-đun Fick cũ.
 
 
-## v0.7.1: scientific validation review (31 Oct 2026)
+## v0.8: scientific validation review (31 Oct 2026)
 
 1. Measured rows are **screened by measured RCM**, never certified by an in-sample
    prediction. Proposed interpolation rows are screened **by predicted RCM only**,
@@ -95,3 +97,14 @@ Mã nền: `rcm_training.py`; mô-đun mới: `inverse_design.py`; giao diện: 
 
 Release checked with 23 automated tests. Streamlit UI could not be executed
 in this environment (Streamlit package unavailable); run it after deployment.
+
+
+## Cap nhat v0.8: Tuoi tho AI KHONG FICK
+
+- Co tab **Tuoi tho AI**, cho phep nap file CSV **co nhan thoi gian da quan sat** va nguon cua tung mau, hoc may 9 thuat toan theo GroupKFold.
+- **Chua co du lieu tuoi tho that:** 215 mau Dryad chi co RCM, tab hien canh bao thay vi bịa ra con so nam.
+- Can CSV rieng co `time_to_limit_years`, `limit_state`, `event_observed`, `source_group`, `source_reference` va cac thong so. File mau chi co ten cot.
+- Neu `event_observed=0` (chua phat hien hong): dung lai, can survival analysis; khong coi tuoi quan sat la tuoi tho.
+- Chi nhan nhan cung mot `limit_state`; mo hinh chon theo CV, kiem tra nguon doc lap o holdout.
+- Xu ly de xuat thiet ke ngược RCM giu nguyen v0.7.1.
+- Chi tiet xem `README_TUOI_THO_AI.md`.

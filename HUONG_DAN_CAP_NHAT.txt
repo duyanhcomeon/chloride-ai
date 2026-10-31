@@ -1,0 +1,13 @@
+CLORILIFE AI v0.8 - NHAN THUC THO AI (KHONG FICK)
+
+1. Backup repository GitHub truoc khi thay file.
+2. Neu dang v0.7.1, giai nen CloriLife_AI_v0_8_GitHub_Update.zip.
+3. Thay file app.py va README.md; them lifetime_ml.py, lifespan_ui.py, README_TUOI_THO_AI.md va CloriLife_TuoiThoAI_CSV_Mau_CauTruc.csv.
+4. Khong xoa rcm_training.py, inverse_design.py, real_rcm_flyash_215.csv hay concrete_texture.jpg.
+5. Commit, kiem tra Streamlit Cloud app logs, vao tab 'Tuoi tho AI'.
+6. Khi chua co CSV co nhan tuoi tho, tab CHI hien canh bao - day la dung, khong phai loi.
+7. Khi co du lieu co nhan time_to_limit_years / event_observed / limit_state / source_group, tai file len de huan luyen va danh gia.
+8. Chay tests: python -m pytest -q tests.
+
+CANH BAO: 215 mau RCM KHONG co nhan thoi gian hong. KHONG bao gio tu sinh tuoi tho va goi la so lieu thuc.
+Neu co event_observed=0, can phuong phap survival analysis, khong dung hoi quy thong thuong.
